@@ -24,36 +24,26 @@ interface Goal {
   inleg: number;
   toon: boolean;
 }
-
-// ---------- Pure rekenfuncties ----------
-const r12 = (annual: number): number => annual / 100 / 12;
-
-function fvSeries(start: number, monthly: number, annual: number, years: number): number {
-  if (years <= 0) return start;
-  const r = r12(annual);
-  const n = years * 12;
-  const g = Math.pow(1 + r, n);
-  return start * g + monthly * ((g - 1) / r);
+interface Results {
+  eind: Record<number, number>;
+  nominaalEind: number;
+  totaalIngelegd: number;
+  benodigd: Record<number, number>;
+  benodigdNominaal: number;
+  buffer: number;
+  fInfl: number;
+  reeelEind: number;
+  uitgavenNaInflatie: number;
+  benodigdNaInflatie: number;
+  inlegInStandHouden: number;
+  inlegLevenskosten: number;
+  inlegLevenskostenInflatie: number;
+  chart: { labels: number[]; series: { rate: number; data: number[] }[] };
+  opbouwjaren: number;
+  onttrekkingsjaren: number;
 }
 
-function benodigdKapitaal(monthly: number, annual: number, years: number): number {
-  if (years <= 0 || monthly <= 0) return 0;
-  const r = r12(annual);
-  const m = years * 12;
-  return monthly * (1 - Math.pow(1 + r, -m)) / r;
-}
-
-function benodigdeInleg(target: number, start: number, annual: number, years: number): number {
-  if (years <= 0) return 0;
-  const r = r12(annual);
-  const n = years * 12;
-  const g = Math.pow(1 + r, n);
-  const out = (target - start * g) * r / (g - 1);
-  return out < 0 ? 0 : out;
-}
-
-const inflFactor = (rate: number, years: number): number => Math.pow(1 + rate / 100, years);
-
+// ---------- Rekenkunde draait server-side in netlify/functions/bereken.ts ----------
 const euro = (n: number): string =>
   '€ ' + new Intl.NumberFormat('nl-NL', { maximumFractionDigits: 0 }).format(Math.round(n || 0));
 
@@ -88,6 +78,8 @@ export default function VermogensopbouwCalculator() {
   const [totLeeftijd, setTotLeeftijd] = useState<string>('');
   const [geenPensioen, setGeenPensioen] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
+  const [results, setResults] = useState<Results | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const chartRef = useRef<any>(null);
@@ -105,50 +97,74 @@ export default function VermogensopbouwCalculator() {
     }
   }, []);
 
-  // ---------- Berekeningen ----------
+  // ---------- Invoer-afgeleiden (alleen voor labels en de aanvraag) ----------
   const hl = parseFloat(huidigeLeeftijd) || 0;
   const bl = parseFloat(beschikbaarLeeftijd) || 0;
   const tl = parseFloat(totLeeftijd) || 0;
   const opbouwjaren = Math.max(0, bl - hl);
   const onttrekkingsjaren = Math.max(0, tl - bl);
 
-  const totaalIngelegd = startbedrag + maandinleg * opbouwjaren * 12;
-  const eind: Record<number, number> = {};
-  scenarios.forEach((s) => (eind[s.rate] = fvSeries(startbedrag, maandinleg, s.rate, opbouwjaren)));
-  const nominaalEind = eind[RENDEMENT];
+  // ---------- Resultaten komen server-side terug uit de Netlify function ----------
+  const eind = results?.eind ?? ({ 7: 0, 10: 0, 12: 0 } as Record<number, number>);
+  const nominaalEind = results?.nominaalEind ?? 0;
+  const totaalIngelegd = results?.totaalIngelegd ?? 0;
+  const benodigd = results?.benodigd ?? ({ 7: 0, 10: 0, 12: 0 } as Record<number, number>);
+  const benodigdNominaal = results?.benodigdNominaal ?? 0;
+  const buffer = results?.buffer ?? 0;
+  const fInfl = results?.fInfl ?? 1;
+  const reeelEind = results?.reeelEind ?? 0;
+  const uitgavenNaInflatie = results?.uitgavenNaInflatie ?? 0;
+  const benodigdNaInflatie = results?.benodigdNaInflatie ?? 0;
+  const inlegInStandHouden = results?.inlegInStandHouden ?? 0;
+  const inlegLevenskosten = results?.inlegLevenskosten ?? 0;
+  const inlegLevenskostenInflatie = results?.inlegLevenskostenInflatie ?? 0;
 
-  const benodigd: Record<number, number> = {};
-  scenarios.forEach((s) => (benodigd[s.rate] = benodigdKapitaal(maanduitgaven, s.rate, onttrekkingsjaren)));
-  const benodigdNominaal = geenPensioen ? 0 : benodigd[RENDEMENT];
-  const buffer = nominaalEind - benodigdNominaal;
-
-  const fInfl = inflFactor(INFLATIE, opbouwjaren);
-  const reeelEind = nominaalEind / fInfl;
-  const uitgavenNaInflatie = maanduitgaven * fInfl;
-  const benodigdNaInflatie = benodigdNominaal * fInfl;
-
-  const inlegInStandHouden = benodigdeInleg(nominaalEind * fInfl, startbedrag, RENDEMENT, opbouwjaren);
-  const inlegLevenskosten = benodigdeInleg(benodigdNominaal, startbedrag, RENDEMENT, opbouwjaren);
-  const inlegLevenskostenInflatie = benodigdeInleg(benodigdNaInflatie, startbedrag, RENDEMENT, opbouwjaren);
+  const fetchResults = async (override: Record<string, unknown> = {}) => {
+    setLoading(true);
+    try {
+      const payload = {
+        startbedrag,
+        maandinleg,
+        maanduitgaven,
+        opbouwjaren: Math.max(0, bl - hl),
+        onttrekkingsjaren: Math.max(0, tl - bl),
+        geenPensioen,
+        ...override,
+      };
+      const res = await fetch('/.netlify/functions/bereken', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      setResults((await res.json()) as Results);
+    } catch {
+      setResults(null);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // ---------- Chart ----------
   useEffect(() => {
-    if (step !== 3) return;
+    if (step !== 3 || !results) return;
     let cancelled = false;
     const w = window as any;
     const draw = () => {
-      if (cancelled || !canvasRef.current || !w.Chart) return;
+      if (cancelled || !canvasRef.current || !w.Chart || !results) return;
       if (chartRef.current) chartRef.current.destroy();
-      const labels = Array.from({ length: opbouwjaren + 1 }, (_, i) => i);
-      const datasets = scenarios.map((s) => ({
-        label: `${s.naam} (${s.rate}%)`,
-        data: labels.map((y) => fvSeries(startbedrag, maandinleg, s.rate, y)),
-        borderColor: s.kleur,
-        backgroundColor: 'transparent',
-        borderWidth: 2.5,
-        pointRadius: 0,
-        tension: 0.25,
-      }));
+      const labels = results.chart.labels;
+      const datasets = results.chart.series.map((serie) => {
+        const sc = scenarios.find((s) => s.rate === serie.rate);
+        return {
+          label: `${sc?.naam ?? ''} (${serie.rate}%)`,
+          data: serie.data,
+          borderColor: sc?.kleur ?? '#6B2D84',
+          backgroundColor: 'transparent',
+          borderWidth: 2.5,
+          pointRadius: 0,
+          tension: 0.25,
+        };
+      });
       chartRef.current = new w.Chart(canvasRef.current, {
         type: 'line',
         data: { labels, datasets },
@@ -205,7 +221,7 @@ export default function VermogensopbouwCalculator() {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, startbedrag, maandinleg, opbouwjaren]);
+  }, [step, results]);
 
   // ---------- Navigatie ----------
   const go = (n: number) => {
@@ -219,12 +235,13 @@ export default function VermogensopbouwCalculator() {
     if (bl <= hl) return setError('De beschikbaar-leeftijd moet hoger zijn dan je huidige leeftijd.');
     go(2);
   };
-  const next4 = (skip: boolean) => {
+  const next4 = async (skip: boolean) => {
     setGeenPensioen(skip);
     if (!skip) {
       if (!tl) return setError('Vul in tot welke leeftijd het vermogen mee moet gaan.');
       if (tl <= bl) return setError('Die leeftijd moet hoger zijn dan je beschikbaar-leeftijd.');
     }
+    await fetchResults({ geenPensioen: skip });
     go(5);
   };
 
@@ -253,6 +270,10 @@ export default function VermogensopbouwCalculator() {
 
       <main className="vc-main">
         <Progress />
+
+        {[3, 5, 6, 7].includes(step) && (loading || !results) && (
+          <p className="vc-loading">Even rekenen…</p>
+        )}
 
         {step === 1 && (
           <section>
@@ -322,14 +343,14 @@ export default function VermogensopbouwCalculator() {
               <button className="vc-btn-back" onClick={() => go(1)}>
                 ← TERUG
               </button>
-              <button className="vc-btn-primary" onClick={() => go(3)}>
+              <button className="vc-btn-primary" onClick={async () => { await fetchResults(); go(3); }}>
                 BEREKEN →
               </button>
             </div>
           </section>
         )}
 
-        {step === 3 && (
+        {step === 3 && results && !loading && (
           <section>
             <div className="vc-step">STAP 3 VAN 7 — JOUW OPBOUW</div>
             <h2>Jouw vermogen op {bl}-jarige leeftijd</h2>
@@ -434,7 +455,7 @@ export default function VermogensopbouwCalculator() {
           </section>
         )}
 
-        {step === 5 && (
+        {step === 5 && results && !loading && (
           <section>
             <div className="vc-step">STAP 5 VAN 7 — TOTAALOVERZICHT</div>
             <h2>Ben je op koers?</h2>
@@ -516,7 +537,7 @@ export default function VermogensopbouwCalculator() {
           </section>
         )}
 
-        {step === 6 && (
+        {step === 6 && results && !loading && (
           <section>
             <div className="vc-step">STAP 6 VAN 7 — INFLATIEGECORRIGEERD</div>
             <h2>Wat doet inflatie met jouw plan?</h2>
@@ -588,7 +609,7 @@ export default function VermogensopbouwCalculator() {
           </section>
         )}
 
-        {step === 7 && (
+        {step === 7 && results && !loading && (
           <section>
             <div className="vc-step">STAP 7 VAN 7 — BENODIGDE INLEG</div>
             <h2>Wat moet je inleggen?</h2>
@@ -842,6 +863,7 @@ html, body { margin:0 !important; padding:0 !important; background:#F5F5F5 !impo
 .vc-h4 { font-family:'Montserrat',sans-serif; font-weight:700; letter-spacing:1px; font-size:13px; color:#6B2D84; margin:26px 0 6px; }
 .vc-chartwrap { background:#fff; border:1px solid #ebe7ef; border-radius:16px; padding:20px; height:300px; margin-bottom:14px; }
 .vc-foot { color:#9a9aa2; font-size:12px; text-align:center; margin:14px 0 24px; }
+.vc-loading { text-align:center; color:#6B2D84; font-family:'Montserrat',sans-serif; font-weight:700; letter-spacing:1px; font-size:14px; padding:40px 0; }
 .vc-cta { background:linear-gradient(110deg,#211A3A,#5a2576 60%,#7A2D8F); border-radius:16px; padding:24px; display:flex; align-items:center; justify-content:space-between; gap:18px; color:#fff; }
 .vc-cta h3 { font-family:'Montserrat',sans-serif; font-weight:700; margin:0 0 6px; font-size:18px; }
 .vc-cta p { margin:0; font-style:italic; font-size:14px; opacity:.9; }
