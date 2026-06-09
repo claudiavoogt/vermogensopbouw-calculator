@@ -43,7 +43,7 @@ interface Results {
   onttrekkingsjaren: number;
 }
 
-// ---------- Rekenkunde draait server-side in netlify/functions/bereken.ts ----------
+// ---------- Rekenkunde draait server-side in app/api/bereken/route.ts ----------
 const euro = (n: number): string =>
   '€ ' + new Intl.NumberFormat('nl-NL', { maximumFractionDigits: 0 }).format(Math.round(n || 0));
 
@@ -131,7 +131,7 @@ export default function VermogensopbouwCalculator() {
         geenPensioen,
         ...override,
       };
-      const res = await fetch('/.netlify/functions/bereken', {
+      const res = await fetch('/api/bereken', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
