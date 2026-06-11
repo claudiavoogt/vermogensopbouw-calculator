@@ -719,33 +719,15 @@ export default function VermogensopbouwCalculator() {
       </main>
 
       <footer className="vc-footer">
-        <div className="vc-logos">
-          <div className="vc-logo">
-            <img
-              src="/logo-cv.png"
-              alt="Claudia Voogt"
-              onError={(e) => {
-                const t = e.target as HTMLImageElement;
-                t.style.display = 'none';
-                if (t.nextElementSibling) (t.nextElementSibling as HTMLElement).style.display = 'block';
-              }}
-            />
-            <span style={{ display: 'none' }}>Claudia Voogt</span>
-          </div>
-          <div className="vc-logo">
-            <img
-              src="/logo-ff.png"
-              alt="Fearless Freedom"
-              onError={(e) => {
-                const t = e.target as HTMLImageElement;
-                t.style.display = 'none';
-                if (t.nextElementSibling) (t.nextElementSibling as HTMLElement).style.display = 'block';
-              }}
-            />
-            <span style={{ display: 'none' }}>Fearless Freedom</span>
-          </div>
-        </div>
-        <p className="vc-copy">© Claudia Voogt — Fearless Freedom</p>
+        <p className="vc-copy">
+          <a href="https://claudiavoogt.nl" target="_blank" rel="noopener noreferrer" style={{ color: '#cdbcd9', textDecoration: 'underline' }}>
+            claudiavoogt.nl
+          </a>
+          {' '}— Beleggingsexpert &amp; investeringsmentor
+        </p>
+        <p className="vc-copy" style={{ marginTop: 6, opacity: 0.65, fontSize: 11 }}>
+          © {new Date().getFullYear()} Claudia Voogt. Alle rechten voorbehouden. Deze tool mag niet worden gekopieerd, nagebouwd of hergebruikt zonder schriftelijke toestemming.
+        </p>
       </footer>
 
       {/* PDF-RAPPORT */}
@@ -799,6 +781,10 @@ export default function VermogensopbouwCalculator() {
           geen box 3 belasting). Dit is geen beleggingsadvies en biedt geen garantie op werkelijke rendementen. Jouw
           werkelijke resultaten kunnen sterk afwijken op basis van marktomstandigheden, je keuzes en persoonlijke
           situatie.
+        </p>
+        <p className="vc-report-disclaimer">
+          Gemaakt met de Vermogensopbouw Calculator van claudiavoogt.nl, beleggingsexpert &amp; investeringsmentor.
+          © {new Date().getFullYear()} Claudia Voogt. Alle rechten voorbehouden.
         </p>
       </div>
     </div>
