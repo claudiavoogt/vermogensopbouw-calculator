@@ -709,6 +709,22 @@ export default function VermogensopbouwCalculator() {
               </button>
               <p className="vc-hint">Bestand → Afdrukken → Opslaan als PDF</p>
             </div>
+
+            <div className="vc-quickedit">
+              <div className="vc-quickedit-label">IETS AANPASSEN?</div>
+              <div className="vc-quickedit-btns">
+                <button className="vc-btn-quick" onClick={() => go(1)}>
+                  ✏️ Leeftijd
+                </button>
+                <button className="vc-btn-quick" onClick={() => go(2)}>
+                  ✏️ Inleg
+                </button>
+                <button className="vc-btn-quick" onClick={() => go(4)}>
+                  ✏️ Uitgaven &amp; looptijd
+                </button>
+              </div>
+            </div>
+
             <div className="vc-btns">
               <button className="vc-btn-back" onClick={() => go(6)}>
                 ← TERUG
@@ -900,8 +916,12 @@ html, body { margin:0 !important; padding:0 !important; background:#F5F5F5 !impo
   .vc-rcard-num { font-family:'Montserrat',sans-serif; font-weight:800; font-size:17px; }
   .vc-report-disclaimer { color:#6b6b73; font-size:11px; line-height:1.5; margin-top:18px; }
 }
-@media (max-width:560px) {
-  .vc-cards3, .vc-cards2 { flex-wrap:wrap; }
+.vc-quickedit { background:#f4f1f7; border-radius:14px; padding:20px 22px; margin:24px 0 8px; }
+.vc-quickedit-label { font-family:'Montserrat',sans-serif; font-weight:700; letter-spacing:2px; font-size:11px; color:#6B2D84; margin-bottom:14px; }
+.vc-quickedit-btns { display:flex; flex-wrap:wrap; gap:10px; }
+.vc-btn-quick { background:#fff; color:#1A1F36; border:1.5px solid #cdbcd9; padding:10px 18px; border-radius:10px; font-family:'Montserrat',sans-serif; font-weight:700; letter-spacing:.5px; font-size:12px; cursor:pointer; transition:border-color .15s, background .15s; }
+.vc-btn-quick:hover { border-color:#6B2D84; background:#f9f5fc; }
+@media (max-width:560px) { .vc-btn-quick { flex:1; min-width:calc(50% - 5px); text-align:center; } }
   .vc-card { min-width:calc(50% - 14px); }
   .vc-header h1 { font-size:26px; }
   .vc-cta { flex-direction:column; align-items:flex-start; }
