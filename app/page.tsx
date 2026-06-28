@@ -697,10 +697,7 @@ export default function VermogensopbouwCalculator() {
             />
 
             <p className="vc-disclaimer">
-              Deze calculator is puur informatief en gebaseerd op aannames ({INFLATIE}% inflatie, {RENDEMENT}% rendement,
-              geen box 3 belasting). Dit is geen beleggingsadvies en biedt geen garantie op werkelijke rendementen. Jouw
-              werkelijke resultaten kunnen sterk afwijken op basis van marktomstandigheden, je keuzes en persoonlijke
-              situatie.
+              © {new Date().getFullYear()} Claudia Voogt. Alle rechten voorbehouden. Deze tool mag niet worden gedeeld, gekopieerd, nagebouwd of hergebruikt zonder schriftelijke toestemming. Deze tool is een hulpmiddel, geen beleggingsadvies. De informatie is met zorg samengesteld, maar er kunnen geen rechten aan worden ontleend. Juistheid en volledigheid worden niet gegarandeerd.
             </p>
 
             <div className="vc-pdfwrap">
@@ -793,10 +790,7 @@ export default function VermogensopbouwCalculator() {
         </div>
 
         <p className="vc-report-disclaimer">
-          Deze calculator is puur informatief en gebaseerd op aannames ({INFLATIE}% inflatie, {RENDEMENT}% rendement,
-          geen box 3 belasting). Dit is geen beleggingsadvies en biedt geen garantie op werkelijke rendementen. Jouw
-          werkelijke resultaten kunnen sterk afwijken op basis van marktomstandigheden, je keuzes en persoonlijke
-          situatie.
+          © {new Date().getFullYear()} Claudia Voogt. Alle rechten voorbehouden. Deze tool mag niet worden gedeeld, gekopieerd, nagebouwd of hergebruikt zonder schriftelijke toestemming. Deze tool is een hulpmiddel, geen beleggingsadvies. De informatie is met zorg samengesteld, maar er kunnen geen rechten aan worden ontleend. Juistheid en volledigheid worden niet gegarandeerd.
         </p>
         <p className="vc-report-disclaimer">
           Gemaakt met de Vermogensopbouw Calculator van claudiavoogt.nl, beleggingsexpert &amp; investeringsmentor.
