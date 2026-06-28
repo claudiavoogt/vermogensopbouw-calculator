@@ -734,7 +734,7 @@ export default function VermogensopbouwCalculator() {
           </a>
           {' '}— Beleggingsexpert &amp; investeringsmentor
         </p>
-        <p className="vc-copy" style={{ marginTop: 6, color: '#ffffff', opacity: 0.9, fontSize: 11 }}>
+        <p className="vc-copy" style={{ marginTop: 6, color: '#ffffff', opacity: 0.9, fontSize: 11, maxWidth: 600, margin: '6px auto 0' }}>
           © {new Date().getFullYear()} Claudia Voogt. Alle rechten voorbehouden. Deze tool mag niet worden gedeeld, gekopieerd, nagebouwd of hergebruikt zonder schriftelijke toestemming. Deze tool is een hulpmiddel, geen beleggingsadvies. De informatie is met zorg samengesteld, maar er kunnen geen rechten aan worden ontleend. Juistheid en volledigheid worden niet gegarandeerd.
         </p>
       </footer>
