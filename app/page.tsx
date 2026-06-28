@@ -696,10 +696,6 @@ export default function VermogensopbouwCalculator() {
               text={`Berekening op basis van ${RENDEMENT}% bruto rendement, zonder box 3 belasting. Inflatie: ${INFLATIE}% per jaar.`}
             />
 
-            <p className="vc-disclaimer">
-              © {new Date().getFullYear()} Claudia Voogt. Alle rechten voorbehouden. Deze tool mag niet worden gedeeld, gekopieerd, nagebouwd of hergebruikt zonder schriftelijke toestemming. Deze tool is een hulpmiddel, geen beleggingsadvies. De informatie is met zorg samengesteld, maar er kunnen geen rechten aan worden ontleend. Juistheid en volledigheid worden niet gegarandeerd.
-            </p>
-
             <div className="vc-pdfwrap">
               <button className="vc-btn-primary" onClick={printPdf}>
                 OPSLAAN ALS PDF
@@ -739,7 +735,7 @@ export default function VermogensopbouwCalculator() {
           {' '}— Beleggingsexpert &amp; investeringsmentor
         </p>
         <p className="vc-copy" style={{ marginTop: 6, color: '#ffffff', opacity: 0.9, fontSize: 11 }}>
-          © 2026 Claudia Voogt. Alle rechten voorbehouden. Deze tool mag niet worden gedeeld, gekopieerd, nagebouwd of hergebruikt zonder schriftelijke toestemming.
+          © {new Date().getFullYear()} Claudia Voogt. Alle rechten voorbehouden. Deze tool mag niet worden gedeeld, gekopieerd, nagebouwd of hergebruikt zonder schriftelijke toestemming. Deze tool is een hulpmiddel, geen beleggingsadvies. De informatie is met zorg samengesteld, maar er kunnen geen rechten aan worden ontleend. Juistheid en volledigheid worden niet gegarandeerd.
         </p>
       </footer>
 
