@@ -47,7 +47,9 @@ interface Results {
 const euro = (n: number): string =>
   '€ ' + new Intl.NumberFormat('nl-NL', { maximumFractionDigits: 0 }).format(Math.round(n || 0));
 
-const INFLATIE = 2;
+const formatProcent = (n: number): string => n.toFixed(1).replace('.', ',') + '%';
+
+const INFLATIE_DEFAULT = 2;
 const RENDEMENT = 10;
 
 const scenarios: Scenario[] = [
@@ -77,6 +79,7 @@ export default function VermogensopbouwCalculator() {
   const [maanduitgaven, setMaanduitgaven] = useState<number>(3000);
   const [totLeeftijd, setTotLeeftijd] = useState<string>('');
   const [geenPensioen, setGeenPensioen] = useState<boolean>(false);
+  const [inflatie, setInflatie] = useState<number>(INFLATIE_DEFAULT);
   const [error, setError] = useState<string>('');
   const [results, setResults] = useState<Results | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
@@ -129,6 +132,7 @@ export default function VermogensopbouwCalculator() {
         opbouwjaren: Math.max(0, bl - hl),
         onttrekkingsjaren: Math.max(0, tl - bl),
         geenPensioen,
+        inflatie,
         ...override,
       };
       const res = await fetch('/api/bereken', {
@@ -250,7 +254,7 @@ export default function VermogensopbouwCalculator() {
 
   const Progress = () => (
     <div className="vc-progress">
-      {[1, 2, 3, 4, 5, 6, 7].map((i) => (
+      {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
         <span key={i} className={i < step ? 'done' : i === step ? 'active' : 'todo'} />
       ))}
     </div>
@@ -271,13 +275,13 @@ export default function VermogensopbouwCalculator() {
       <main className="vc-main">
         <Progress />
 
-        {[3, 5, 6, 7].includes(step) && (loading || !results) && (
+        {[3, 5, 6, 7, 8].includes(step) && (loading || !results) && (
           <p className="vc-loading">Even rekenen…</p>
         )}
 
         {step === 1 && (
           <section>
-            <div className="vc-step">STAP 1 VAN 7</div>
+            <div className="vc-step">STAP 1 VAN 8</div>
             <h2>Wie ben jij?</h2>
             <p className="vc-desc">We beginnen met de basis, zodat we jouw situatie goed kunnen inschatten.</p>
             <label className="vc-label">HUIDIGE LEEFTIJD</label>
@@ -307,7 +311,7 @@ export default function VermogensopbouwCalculator() {
 
         {step === 2 && (
           <section>
-            <div className="vc-step">STAP 2 VAN 7</div>
+            <div className="vc-step">STAP 2 VAN 8</div>
             <h2>Hoeveel leg je in?</h2>
             <p className="vc-desc">
               Zelfs een klein bedrag kan over tijd enorm groeien. Dat is de kracht van vroeg beginnen.
@@ -352,7 +356,7 @@ export default function VermogensopbouwCalculator() {
 
         {step === 3 && results && !loading && (
           <section>
-            <div className="vc-step">STAP 3 VAN 7 — JOUW OPBOUW</div>
+            <div className="vc-step">STAP 3 VAN 8 — JOUW OPBOUW</div>
             <h2>Jouw vermogen op {bl}-jarige leeftijd</h2>
             <p className="vc-desc">
               Over {opbouwjaren} jaar, bij {euro(maandinleg)} per maand.
@@ -398,7 +402,7 @@ export default function VermogensopbouwCalculator() {
 
         {step === 4 && (
           <section>
-            <div className="vc-step">STAP 4 VAN 7 — WAT HEB JE NODIG?</div>
+            <div className="vc-step">STAP 4 VAN 8 — WAT HEB JE NODIG?</div>
             <h2>Hoeveel wil je per maand uitgeven?</h2>
             <p className="vc-desc">
               Denk aan vaste lasten, boodschappen, vakanties, alles erbij. Wat heb je netto per maand nodig om
@@ -457,7 +461,7 @@ export default function VermogensopbouwCalculator() {
 
         {step === 5 && results && !loading && (
           <section>
-            <div className="vc-step">STAP 5 VAN 7 — TOTAALOVERZICHT</div>
+            <div className="vc-step">STAP 5 VAN 8 — TOTAALOVERZICHT</div>
             <h2>Ben je op koers?</h2>
             <p className="vc-desc">
               Op basis van {euro(maandinleg)} per maand inleggen
@@ -523,7 +527,7 @@ export default function VermogensopbouwCalculator() {
             <div className="vc-cta">
               <div>
                 <h3>Wat doet inflatie met jouw plan?</h3>
-                <p>Zie wat 2% inflatie per jaar betekent voor je eindkapitaal en levenskosten.</p>
+                <p>Zie wat inflatie per jaar betekent voor je eindkapitaal en levenskosten, en pas 'm zelf aan.</p>
               </div>
               <button className="vc-btn-primary" onClick={() => go(6)}>
                 BEKIJK INFLATIE →
@@ -539,12 +543,30 @@ export default function VermogensopbouwCalculator() {
 
         {step === 6 && results && !loading && (
           <section>
-            <div className="vc-step">STAP 6 VAN 7 — INFLATIEGECORRIGEERD</div>
+            <div className="vc-step">STAP 6 VAN 8 — INFLATIEGECORRIGEERD</div>
             <h2>Wat doet inflatie met jouw plan?</h2>
             <p className="vc-desc">
-              Bij {INFLATIE}% inflatie per jaar kost hetzelfde leven na {opbouwjaren} jaar {euro(uitgavenNaInflatie)} per
+              Bij {formatProcent(inflatie)} inflatie per jaar kost hetzelfde leven na {opbouwjaren} jaar {euro(uitgavenNaInflatie)} per
               maand in plaats van {euro(maanduitgaven)}. Dit is wat dat betekent voor jouw plan.
             </p>
+            <label className="vc-label">INFLATIE PER JAAR</label>
+            <div className="vc-sliderrow">
+              <input
+                className="vc-slider"
+                type="range"
+                min="0"
+                max="10"
+                step="0.5"
+                value={inflatie}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  setInflatie(v);
+                  fetchResults({ inflatie: v });
+                }}
+              />
+              <span className="vc-slidervalue">{formatProcent(inflatie)}</span>
+            </div>
+            <p className="vc-hint">Historisch gemiddelde EU-inflatie: ±2–3%. In 2022 liep het op tot 10%+.</p>
             <h4 className="vc-h4">JOUW EINDKAPITAAL IN HUIDIGE KOOPKRACHT</h4>
             <p className="vc-desc">
               Door inflatie is €1 in de toekomst minder waard. Dit is wat jouw opgebouwde vermogen straks écht betekent.
@@ -556,7 +578,7 @@ export default function VermogensopbouwCalculator() {
                 <div className="vc-card-note">wat je opbouwt op papier</div>
               </div>
               <div className="vc-card hl">
-                <div className="vc-card-label">REËEL (MET {INFLATIE}% INFLATIE)</div>
+                <div className="vc-card-label">REËEL (MET {formatProcent(inflatie)} INFLATIE)</div>
                 <div className="vc-card-num fuchsia">{euro(reeelEind)}</div>
                 <div className="vc-card-note">koopkracht in huidige euro's</div>
               </div>
@@ -575,7 +597,7 @@ export default function VermogensopbouwCalculator() {
                     <div className="vc-card-note">op basis van huidige kosten</div>
                   </div>
                   <div className="vc-card hl">
-                    <div className="vc-card-label">BENODIGD (MET {INFLATIE}% INFLATIE)</div>
+                    <div className="vc-card-label">BENODIGD (MET {formatProcent(inflatie)} INFLATIE)</div>
                     <div className="vc-card-num small fuchsia">{euro(benodigdNaInflatie)}</div>
                     <div className="vc-card-note">gecorrigeerde levenskosten</div>
                   </div>
@@ -584,21 +606,21 @@ export default function VermogensopbouwCalculator() {
             )}
             <div className="vc-table">
               <Row k="Opbouwperiode" v={`${opbouwjaren} jaar`} />
-              <Row k="Inflatiepercentage" v={`${INFLATIE}% per jaar`} />
+              <Row k="Inflatiepercentage" v={`${formatProcent(inflatie)} per jaar`} />
               {!geenPensioen && <Row k="Maandelijkse uitgaven nu" v={euro(maanduitgaven)} />}
               {!geenPensioen && <Row k={`Maandelijkse uitgaven na ${opbouwjaren} jaar`} v={euro(uitgavenNaInflatie)} last />}
               {geenPensioen && <Row k="Reëel eindkapitaal (huidige koopkracht)" v={euro(reeelEind)} last />}
             </div>
             <Foot
-              text={`Berekening op basis van bruto rendement, zonder box 3 belasting. Inflatie: ${INFLATIE}% per jaar.`}
+              text={`Berekening op basis van bruto rendement, zonder box 3 belasting. Inflatie: ${formatProcent(inflatie)} per jaar.`}
             />
             <div className="vc-cta">
               <div>
-                <h3>Wat moet jij extra inleggen?</h3>
-                <p>Bereken welke maandelijkse inleg je nodig hebt om je doelen inflatiegecorrigeerd te halen.</p>
+                <h3>Wat kun je hier straks mee opnemen?</h3>
+                <p>Bereken hoeveel je maandelijks van dit vermogen kunt opnemen, zonder dat het opraakt.</p>
               </div>
               <button className="vc-btn-primary" onClick={() => go(7)}>
-                BEREKEN INLEG →
+                BEKIJK JE OPNAME →
               </button>
             </div>
             <div className="vc-btns">
@@ -611,7 +633,52 @@ export default function VermogensopbouwCalculator() {
 
         {step === 7 && results && !loading && (
           <section>
-            <div className="vc-step">STAP 7 VAN 7 — BENODIGDE INLEG</div>
+            <div className="vc-step">STAP 7 VAN 8 — WAT KUN JE OPNEMEN</div>
+            <h2>Hoeveel zou je per maand kunnen opnemen?</h2>
+            <p className="vc-desc">
+              Beleggers gebruiken al jaren de <strong>4%-regel</strong>: een vuistregel die zegt hoeveel je jaarlijks van
+              je opgebouwde vermogen kunt opnemen zonder dat het ooit opraakt. Dit is wat dat betekent voor jouw
+              vermogen, op je {bl}e.
+            </p>
+            <div className="vc-cards2">
+              <div className="vc-card">
+                <div className="vc-card-label">NOMINAAL VERMOGEN</div>
+                <div className="vc-card-num">{euro((nominaalEind * 0.04) / 12)}</div>
+                <div className="vc-card-note">per maand, bij 4% opname per jaar</div>
+              </div>
+              <div className="vc-card hl">
+                <div className="vc-card-label">IN HUIDIGE KOOPKRACHT</div>
+                <div className="vc-card-num fuchsia">{euro((reeelEind * 0.04) / 12)}</div>
+                <div className="vc-card-note">per maand, gecorrigeerd voor inflatie</div>
+              </div>
+            </div>
+            <div className="vc-table">
+              <Row k={`Opgebouwd vermogen op je ${bl}e (nominaal)`} v={euro(nominaalEind)} />
+              <Row k="Opgebouwd vermogen in huidige koopkracht" v={euro(reeelEind)} />
+              <Row k="Maandelijkse opname (zonder inflatie)" v={euro((nominaalEind * 0.04) / 12)} />
+              <Row k="Maandelijkse opname, na inflatie" v={euro((reeelEind * 0.04) / 12)} last />
+            </div>
+            <Foot text="De 4%-regel is een vuistregel, geen garantie. De werkelijke uitkomst hangt af van rendement, inflatie en hoe lang het kapitaal moet meegaan. Dit is geen beleggingsadvies." />
+            <div className="vc-cta">
+              <div>
+                <h3>Wat moet jij extra inleggen?</h3>
+                <p>Bereken welke maandelijkse inleg je nodig hebt om je doelen te halen.</p>
+              </div>
+              <button className="vc-btn-primary" onClick={() => go(8)}>
+                BEREKEN INLEG →
+              </button>
+            </div>
+            <div className="vc-btns">
+              <button className="vc-btn-back" onClick={() => go(6)}>
+                ← TERUG
+              </button>
+            </div>
+          </section>
+        )}
+
+        {step === 8 && results && !loading && (
+          <section>
+            <div className="vc-step">STAP 8 VAN 8 — BENODIGDE INLEG</div>
             <h2>Wat moet je inleggen?</h2>
             <p className="vc-desc">
               Dit is wat je per maand zou moeten inleggen om elk doel te halen. We zetten het naast wat je nu inlegt, zodat
@@ -693,7 +760,7 @@ export default function VermogensopbouwCalculator() {
               })}
 
             <Foot
-              text={`Berekening op basis van ${RENDEMENT}% bruto rendement, zonder box 3 belasting. Inflatie: ${INFLATIE}% per jaar.`}
+              text={`Berekening op basis van ${RENDEMENT}% bruto rendement, zonder box 3 belasting. Inflatie: ${formatProcent(inflatie)} per jaar.`}
             />
 
             <div className="vc-pdfwrap">
@@ -719,7 +786,7 @@ export default function VermogensopbouwCalculator() {
             </div>
 
             <div className="vc-btns">
-              <button className="vc-btn-back" onClick={() => go(6)}>
+              <button className="vc-btn-back" onClick={() => go(7)}>
                 ← TERUG
               </button>
             </div>
@@ -773,8 +840,15 @@ export default function VermogensopbouwCalculator() {
 
         <div className="vc-report-box">
           <div className="vc-report-boxtitle">INFLATIEGECORRIGEERD</div>
+          <Row k="Inflatiepercentage" v={`${formatProcent(inflatie)} per jaar`} />
           <Row k="Reëel eindkapitaal (huidige koopkracht)" v={euro(reeelEind)} last={geenPensioen} />
           {!geenPensioen && <Row k="Benodigd na inflatie" v={euro(benodigdNaInflatie)} last />}
+        </div>
+
+        <div className="vc-report-box">
+          <div className="vc-report-boxtitle">WAT KUN JE PER MAAND OPNEMEN (4%-REGEL)</div>
+          <Row k="Maandelijkse opname (zonder inflatie)" v={euro((nominaalEind * 0.04) / 12)} />
+          <Row k="Maandelijkse opname, na inflatie" v={euro((reeelEind * 0.04) / 12)} last />
         </div>
 
         <div className="vc-report-box">

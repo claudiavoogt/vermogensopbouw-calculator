@@ -29,7 +29,7 @@ function benodigdeInleg(target: number, start: number, annual: number, years: nu
 
 const inflFactor = (rate: number, years: number): number => Math.pow(1 + rate / 100, years);
 
-const INFLATIE = 2;
+const INFLATIE_DEFAULT = 2;
 const RENDEMENT = 10;
 const RATES = [7, 10, 12];
 
@@ -42,6 +42,8 @@ export async function POST(request: NextRequest) {
     const opbouwjaren = Math.max(0, Number(b.opbouwjaren) || 0);
     const onttrekkingsjaren = Math.max(0, Number(b.onttrekkingsjaren) || 0);
     const geenPensioen = !!b.geenPensioen;
+    const inflatieRaw = Number(b.inflatie);
+    const inflatie = Number.isFinite(inflatieRaw) ? Math.max(0, Math.min(10, inflatieRaw)) : INFLATIE_DEFAULT;
 
     const eind: Record<number, number> = {};
     RATES.forEach((rt) => (eind[rt] = fvSeries(startbedrag, maandinleg, rt, opbouwjaren)));
@@ -53,7 +55,7 @@ export async function POST(request: NextRequest) {
     const benodigdNominaal = geenPensioen ? 0 : benodigd[RENDEMENT];
     const buffer = nominaalEind - benodigdNominaal;
 
-    const fInfl = inflFactor(INFLATIE, opbouwjaren);
+    const fInfl = inflFactor(inflatie, opbouwjaren);
     const reeelEind = nominaalEind / fInfl;
     const uitgavenNaInflatie = maanduitgaven * fInfl;
     const benodigdNaInflatie = benodigdNominaal * fInfl;
@@ -76,6 +78,7 @@ export async function POST(request: NextRequest) {
       benodigdNominaal,
       buffer,
       fInfl,
+      inflatie,
       reeelEind,
       uitgavenNaInflatie,
       benodigdNaInflatie,
