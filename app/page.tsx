@@ -637,8 +637,8 @@ export default function VermogensopbouwCalculator() {
             <h2>Hoeveel zou je per maand kunnen opnemen?</h2>
             <p className="vc-desc">
               Beleggers gebruiken al jaren de <strong>4%-regel</strong>: een vuistregel die zegt hoeveel je jaarlijks van
-              je opgebouwde vermogen kunt opnemen zonder dat het ooit opraakt. Dit is wat dat betekent voor jouw
-              vermogen, op je {bl}e.
+              je opgebouwde vermogen kunt opnemen <strong>zonder dat het ooit opraakt</strong>. Dit is wat dat betekent
+              voor jouw vermogen, op je {bl}e.
             </p>
             <div className="vc-cards2">
               <div className="vc-card">
