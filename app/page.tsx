@@ -54,7 +54,7 @@ const RENDEMENT = 10;
 
 const scenarios: Scenario[] = [
   { naam: 'Matig', rate: 7, kleur: '#8a8d99' },
-  { naam: 'Normaal', rate: RENDEMENT, kleur: '#6B2D84' },
+  { naam: 'Verwacht', rate: RENDEMENT, kleur: '#6B2D84' },
   { naam: 'Optimistisch', rate: 12, kleur: '#3EDCB1' },
 ];
 
@@ -375,7 +375,7 @@ export default function VermogensopbouwCalculator() {
             </div>
             <div className="vc-table">
               <Row k="Totaal ingelegd" v={euro(totaalIngelegd)} />
-              <Row k="Verwachte groei (normaal)" v={euro(nominaalEind - totaalIngelegd)} />
+              <Row k="Verwachte groei" v={euro(nominaalEind - totaalIngelegd)} />
               <Row k="Looptijd" v={`${opbouwjaren} jaar`} />
               <Row k="Maandelijkse inleg" v={euro(maandinleg)} last />
             </div>
@@ -465,7 +465,7 @@ export default function VermogensopbouwCalculator() {
             <h2>Ben je op koers?</h2>
             <p className="vc-desc">
               Op basis van {euro(maandinleg)} per maand inleggen
-              {geenPensioen ? '.' : ` en ${euro(maanduitgaven)} per maand opnemen.`} Normaal scenario (10% rendement).
+              {geenPensioen ? '.' : ` en ${euro(maanduitgaven)} per maand opnemen.`} Verwacht scenario (10% rendement).
             </p>
             <div className="vc-cards2">
               <div className="vc-card">
