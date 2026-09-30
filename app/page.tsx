@@ -15,32 +15,38 @@ interface RowProps {
   green?: boolean;
   red?: boolean;
 }
-interface Goal {
-  titel: string;
-  uitleg: string;
-  opbouw: number | null;
-  midLabel: string;
-  midValue: number;
-  inleg: number;
-  toon: boolean;
+interface Uitkomst {
+  rendement: number;
+  inflatie: number;
+  vermogenNominaal: number;
+  vermogen: number;
+  nodig: number;
+  buffer: number;
+  geldTot: number;
+  geldTotMax: boolean;
+  kanUitgeven: number;
+  inlegNodig: number;
+  vierProcentPerMaand: number;
+}
+interface Paar {
+  zonder: Uitkomst;
+  met: Uitkomst;
 }
 interface Results {
   eind: Record<number, number>;
-  nominaalEind: number;
   totaalIngelegd: number;
-  benodigd: Record<number, number>;
-  benodigdNominaal: number;
-  buffer: number;
-  fInfl: number;
-  reeelEind: number;
-  uitgavenNaInflatie: number;
-  benodigdNaInflatie: number;
-  inlegInStandHouden: number;
-  inlegLevenskosten: number;
-  inlegLevenskostenInflatie: number;
   chart: { labels: number[]; series: { rate: number; data: number[] }[] };
   opbouwjaren: number;
   onttrekkingsjaren: number;
+  beschikbaarLeeftijd: number;
+  ijkLeeftijd: number;
+  inflatie: number;
+  fInfl: number;
+  uitgavenNaInflatie: number;
+  heeftInkomen: boolean;
+  fases: { vanLeeftijd: number; totLeeftijd: number; inkomen: number; gat: number }[];
+  oordeel: 'groen' | 'oranje' | 'rood' | null;
+  scenarios: Record<number, Paar>;
 }
 
 // ---------- Rekenkunde draait server-side in app/api/bereken/route.ts ----------
@@ -48,6 +54,8 @@ const euro = (n: number): string =>
   '€ ' + new Intl.NumberFormat('nl-NL', { maximumFractionDigits: 0 }).format(Math.round(n || 0));
 
 const formatProcent = (n: number): string => n.toFixed(1).replace('.', ',') + '%';
+// Leeftijd zonder onnodige decimalen: 67 blijft 67, 67,25 blijft 67,25
+const formatLeeftijd = (n: number): string => String(Math.round(n * 100) / 100).replace('.', ',');
 
 const INFLATIE_DEFAULT = 2;
 const RENDEMENT = 10;
@@ -69,6 +77,17 @@ function Row({ k, v, last, green, red }: RowProps) {
   );
 }
 
+// ---------- DuoRow: twee kolommen, zonder en met inflatie ----------
+function DuoRow({ k, a, b, last, tone }: { k: string; a: string; b: string; last?: boolean; tone?: 'good' | 'bad' }) {
+  return (
+    <div className={'vc-duo-row' + (last ? ' last' : '')}>
+      <span className="k">{k}</span>
+      <span className="a">{a}</span>
+      <span className={'b' + (tone ? ' ' + tone : '')}>{b}</span>
+    </div>
+  );
+}
+
 // ---------- Page ----------
 export default function VermogensopbouwCalculator() {
   const [step, setStep] = useState<number>(1);
@@ -79,10 +98,19 @@ export default function VermogensopbouwCalculator() {
   const [maanduitgaven, setMaanduitgaven] = useState<number>(3000);
   const [totLeeftijd, setTotLeeftijd] = useState<string>('');
   const [geenPensioen, setGeenPensioen] = useState<boolean>(false);
+  // Ander inkomen op je pensioen: netto per maand in euro's van nu, plus de leeftijd waarop het ingaat
+  const [aowBedrag, setAowBedrag] = useState<string>('');
+  const [aowLeeftijd, setAowLeeftijd] = useState<string>('67');
+  const [pensioenBedrag, setPensioenBedrag] = useState<string>('');
+  const [pensioenLeeftijd, setPensioenLeeftijd] = useState<string>('67');
+  const [overigBedrag, setOverigBedrag] = useState<string>('');
+  const [overigLeeftijd, setOverigLeeftijd] = useState<string>('');
   const [inflatie, setInflatie] = useState<number>(INFLATIE_DEFAULT);
   const [error, setError] = useState<string>('');
   const [results, setResults] = useState<Results | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
+  const [gekozenRate, setGekozenRate] = useState<number>(RENDEMENT);
+  const requestTeller = useRef<number>(0);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const chartRef = useRef<any>(null);
@@ -107,23 +135,42 @@ export default function VermogensopbouwCalculator() {
   const opbouwjaren = Math.max(0, bl - hl);
   const onttrekkingsjaren = Math.max(0, tl - bl);
 
-  // ---------- Resultaten komen server-side terug uit de Netlify function ----------
-  const eind = results?.eind ?? ({ 7: 0, 10: 0, 12: 0 } as Record<number, number>);
-  const nominaalEind = results?.nominaalEind ?? 0;
-  const totaalIngelegd = results?.totaalIngelegd ?? 0;
-  const benodigd = results?.benodigd ?? ({ 7: 0, 10: 0, 12: 0 } as Record<number, number>);
-  const benodigdNominaal = results?.benodigdNominaal ?? 0;
-  const buffer = results?.buffer ?? 0;
-  const fInfl = results?.fInfl ?? 1;
-  const reeelEind = results?.reeelEind ?? 0;
-  const uitgavenNaInflatie = results?.uitgavenNaInflatie ?? 0;
-  const benodigdNaInflatie = results?.benodigdNaInflatie ?? 0;
-  const inlegInStandHouden = results?.inlegInStandHouden ?? 0;
-  const inlegLevenskosten = results?.inlegLevenskosten ?? 0;
-  const inlegLevenskostenInflatie = results?.inlegLevenskostenInflatie ?? 0;
+  // Ander inkomen. Een lege leeftijd bij "overig" betekent: loopt al vanaf je beschikbaar-leeftijd.
+  const inkomenBronnen = [
+    { naam: 'AOW', bedrag: parseFloat(aowBedrag) || 0, vanafLeeftijd: parseFloat(aowLeeftijd) || 0 },
+    { naam: 'Pensioen', bedrag: parseFloat(pensioenBedrag) || 0, vanafLeeftijd: parseFloat(pensioenLeeftijd) || 0 },
+    { naam: 'Overig inkomen', bedrag: parseFloat(overigBedrag) || 0, vanafLeeftijd: parseFloat(overigLeeftijd) || bl },
+  ].filter((b) => b.bedrag > 0);
 
-  const fetchResults = async (override: Record<string, unknown> = {}) => {
-    setLoading(true);
+  // ---------- Resultaten komen server-side terug uit de Netlify function ----------
+  const leeg: Uitkomst = {
+    rendement: 0, inflatie: 0, vermogenNominaal: 0, vermogen: 0, nodig: 0, buffer: 0,
+    geldTot: 0, geldTotMax: false, kanUitgeven: 0, inlegNodig: 0, vierProcentPerMaand: 0,
+  };
+  const sc = (rt: number): Paar => results?.scenarios?.[rt] ?? { zonder: leeg, met: leeg };
+  const verwacht = sc(RENDEMENT);
+  const matig = sc(7);
+  const gek = sc(gekozenRate);
+  const gekozenNaam = scenarios.find((s) => s.rate === gekozenRate)?.naam ?? 'Verwacht';
+  const eind = results?.eind ?? ({ 7: 0, 10: 0, 12: 0 } as Record<number, number>);
+  const nominaalEind = eind[RENDEMENT] ?? 0;
+  const totaalIngelegd = results?.totaalIngelegd ?? 0;
+  const fInfl = results?.fInfl ?? 1;
+  const uitgavenNaInflatie = results?.uitgavenNaInflatie ?? 0;
+  const ijkLeeftijd = results?.ijkLeeftijd ?? 0;
+  const oordeel = results?.oordeel ?? null;
+  const heeftInkomen = results?.heeftInkomen ?? false;
+  const fases = results?.fases ?? [];
+  const inflatieImpact = geenPensioen ? gek.zonder.vermogen - gek.met.vermogen : gek.zonder.buffer - gek.met.buffer;
+
+  // "Tot je 87e" of "Tot je 100+"
+  const leeftijdTekst = (u: Uitkomst): string =>
+    u.geldTotMax || u.geldTot >= 100 ? '100+' : String(Math.floor(u.geldTot + 1e-9)) + 'e';
+  const bufferTekst = (b: number): string => (b >= 0 ? '+ ' + euro(b) : 'tekort ' + euro(-b));
+
+  const fetchResults = async (override: Record<string, unknown> = {}, silent = false) => {
+    const nummer = ++requestTeller.current;
+    if (!silent) setLoading(true);
     try {
       const payload = {
         startbedrag,
@@ -131,6 +178,8 @@ export default function VermogensopbouwCalculator() {
         maanduitgaven,
         opbouwjaren: Math.max(0, bl - hl),
         onttrekkingsjaren: Math.max(0, tl - bl),
+        beschikbaarLeeftijd: bl,
+        inkomen: inkomenBronnen,
         geenPensioen,
         inflatie,
         ...override,
@@ -140,11 +189,14 @@ export default function VermogensopbouwCalculator() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      setResults((await res.json()) as Results);
+      const data = (await res.json()) as Results;
+      if (!data?.scenarios) throw new Error('bad response');
+      // Alleen het nieuwste antwoord telt (bij snel slepen van de schuif)
+      if (nummer === requestTeller.current) setResults(data);
     } catch {
-      setResults(null);
+      if (nummer === requestTeller.current) setResults(null);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -244,6 +296,13 @@ export default function VermogensopbouwCalculator() {
     if (!skip) {
       if (!tl) return setError('Vul in tot welke leeftijd het vermogen mee moet gaan.');
       if (tl <= bl) return setError('Die leeftijd moet hoger zijn dan je beschikbaar-leeftijd.');
+      for (const b of inkomenBronnen) {
+        if (!b.vanafLeeftijd) return setError(`Vul in vanaf welke leeftijd je ${b.naam} ontvangt, of laat het bedrag leeg.`);
+        if (b.vanafLeeftijd >= tl)
+          return setError(
+            `${b.naam} gaat in op ${formatLeeftijd(b.vanafLeeftijd)} jaar, maar je vermogen hoeft maar tot ${formatLeeftijd(tl)} mee. Pas de leeftijd aan of laat het bedrag leeg.`,
+          );
+      }
     }
     await fetchResults({ geenPensioen: skip });
     go(5);
@@ -254,13 +313,27 @@ export default function VermogensopbouwCalculator() {
 
   const Progress = () => (
     <div className="vc-progress">
-      {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+      {[1, 2, 3, 4, 5, 6, 7].map((i) => (
         <span key={i} className={i < step ? 'done' : i === step ? 'active' : 'todo'} />
       ))}
     </div>
   );
 
   const Foot = ({ text }: { text: string }) => <p className="vc-foot">{text}</p>;
+
+  const ScenarioChips = () => (
+    <div className="vc-chips">
+      {scenarios.map((s) => (
+        <button
+          key={s.rate}
+          className={'vc-chip' + (s.rate === gekozenRate ? ' on' : '')}
+          onClick={() => setGekozenRate(s.rate)}
+        >
+          {s.naam} ({s.rate}%)
+        </button>
+      ))}
+    </div>
+  );
 
   return (
     <div className="vc-root">
@@ -275,13 +348,13 @@ export default function VermogensopbouwCalculator() {
       <main className="vc-main">
         <Progress />
 
-        {[3, 5, 6, 7, 8].includes(step) && (loading || !results) && (
+        {[3, 5, 6, 7].includes(step) && (loading || !results) && (
           <p className="vc-loading">Even rekenen…</p>
         )}
 
         {step === 1 && (
           <section>
-            <div className="vc-step">STAP 1 VAN 8</div>
+            <div className="vc-step">STAP 1 VAN 7</div>
             <h2>Wie ben jij?</h2>
             <p className="vc-desc">We beginnen met de basis, zodat we jouw situatie goed kunnen inschatten.</p>
             <label className="vc-label">HUIDIGE LEEFTIJD</label>
@@ -311,7 +384,7 @@ export default function VermogensopbouwCalculator() {
 
         {step === 2 && (
           <section>
-            <div className="vc-step">STAP 2 VAN 8</div>
+            <div className="vc-step">STAP 2 VAN 7</div>
             <h2>Hoeveel leg je in?</h2>
             <p className="vc-desc">
               Zelfs een klein bedrag kan over tijd enorm groeien. Dat is de kracht van vroeg beginnen.
@@ -356,7 +429,7 @@ export default function VermogensopbouwCalculator() {
 
         {step === 3 && results && !loading && (
           <section>
-            <div className="vc-step">STAP 3 VAN 8 — JOUW OPBOUW</div>
+            <div className="vc-step">STAP 3 VAN 7 — JOUW OPBOUW</div>
             <h2>Jouw vermogen op {bl}-jarige leeftijd</h2>
             <p className="vc-desc">
               Over {opbouwjaren} jaar, bij {euro(maandinleg)} per maand.
@@ -402,7 +475,7 @@ export default function VermogensopbouwCalculator() {
 
         {step === 4 && (
           <section>
-            <div className="vc-step">STAP 4 VAN 8 — WAT HEB JE NODIG?</div>
+            <div className="vc-step">STAP 4 VAN 7 — WAT HEB JE NODIG?</div>
             <h2>Hoeveel wil je per maand uitgeven?</h2>
             <p className="vc-desc">
               Denk aan vaste lasten, boodschappen, vakanties, alles erbij. Wat heb je netto per maand nodig om
@@ -428,7 +501,7 @@ export default function VermogensopbouwCalculator() {
               onChange={(e) => setMaanduitgaven(Math.max(0, parseFloat(e.target.value) || 0))}
             />
             <label className="vc-label">
-              Je wilt het vermogen beschikbaar hebben op je {bl ? bl + 'e' : '…'}. Tot welke leeftijd moet het vermogen meegaan?
+              Je wilt het vermogen beschikbaar hebben op je {bl ? bl + 'e' : '…'}. Tot welke leeftijd wil je in elk geval zeker zijn dat het geld meegaat?
             </label>
             <input
               className="vc-input"
@@ -437,7 +510,96 @@ export default function VermogensopbouwCalculator() {
               value={totLeeftijd}
               onChange={(e) => setTotLeeftijd(e.target.value)}
             />
-            <p className="vc-hint">Liever een jaar te veel dan te weinig.</p>
+            <p className="vc-hint">Dit is jouw doelleeftijd, geen einddatum. We laten je straks zien tot welke leeftijd je geld écht meegaat.</p>
+
+            <div className="vc-inkomen">
+              <div className="vc-inkomen-titel">ANDER INKOMEN OP JE PENSIOEN (OPTIONEEL)</div>
+              <p className="vc-inkomen-uitleg">
+                Krijg je later AOW, pensioen of andere inkomsten? Dan hoef je alleen het <strong>verschil</strong> uit je
+                vermogen te halen. Vul per regel het <strong>netto</strong> bedrag per maand in en vanaf welke leeftijd het
+                ingaat. Laat leeg wat niet voor jou geldt.
+              </p>
+              {[
+                {
+                  naam: 'AOW',
+                  bedrag: aowBedrag,
+                  setBedrag: setAowBedrag,
+                  leeftijd: aowLeeftijd,
+                  setLeeftijd: setAowLeeftijd,
+                  ph: '67',
+                  hint: (
+                    <>
+                      Je AOW-bedrag en -leeftijd vind je op{' '}
+                      <a href="https://www.svb.nl/nl/aow/bedragen-aow/aow-bedragen" target="_blank" rel="noopener noreferrer">
+                        svb.nl
+                      </a>
+                      .
+                    </>
+                  ),
+                },
+                {
+                  naam: 'PENSIOEN',
+                  bedrag: pensioenBedrag,
+                  setBedrag: setPensioenBedrag,
+                  leeftijd: pensioenLeeftijd,
+                  setLeeftijd: setPensioenLeeftijd,
+                  ph: '67',
+                  hint: (
+                    <>
+                      Werkgeverspensioen, lijfrente of eigen pensioen. Kijk op{' '}
+                      <a href="https://www.mijnpensioenoverzicht.nl" target="_blank" rel="noopener noreferrer">
+                        mijnpensioenoverzicht.nl
+                      </a>
+                      .
+                    </>
+                  ),
+                },
+                {
+                  naam: 'OVERIG',
+                  bedrag: overigBedrag,
+                  setBedrag: setOverigBedrag,
+                  leeftijd: overigLeeftijd,
+                  setLeeftijd: setOverigLeeftijd,
+                  ph: bl ? String(bl) : 'nu',
+                  hint: <>Bijvoorbeeld huurinkomsten of dividend. Leeg = vanaf de leeftijd waarop je vermogen beschikbaar is.</>,
+                },
+              ].map((r) => (
+                <div key={r.naam} className="vc-inkrow">
+                  <div className="vc-inkname">{r.naam}</div>
+                  <div className="vc-inkfields">
+                    <div>
+                      <span className="vc-inkmini">NETTO PER MAAND (€)</span>
+                      <input
+                        className="vc-input"
+                        type="number"
+                        min="0"
+                        step="50"
+                        placeholder="0"
+                        value={r.bedrag}
+                        onChange={(e) => r.setBedrag(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <span className="vc-inkmini">VANAF LEEFTIJD</span>
+                      <input
+                        className="vc-input"
+                        type="number"
+                        min="0"
+                        step="0.25"
+                        placeholder={r.ph}
+                        value={r.leeftijd}
+                        onChange={(e) => r.setLeeftijd(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <p className="vc-inkhint">{r.hint}</p>
+                </div>
+              ))}
+              <p className="vc-inkhint">
+                We rekenen met vaste bedragen in prijzen van nu, zonder indexatie en zonder belasting. Vul dus netto in, wat
+                je maandelijks écht ontvangt.
+              </p>
+            </div>
             {error && <p className="vc-error">{error}</p>}
             <div className="vc-skipnote">
               Gebruik je je beleggingsvermogen <strong>niet</strong> als pensioen? Klik dan op <strong>Overslaan</strong>. Je
@@ -461,94 +623,18 @@ export default function VermogensopbouwCalculator() {
 
         {step === 5 && results && !loading && (
           <section>
-            <div className="vc-step">STAP 5 VAN 8 — TOTAALOVERZICHT</div>
+            <div className="vc-step">STAP 5 VAN 7 — BEN JE OP KOERS?</div>
             <h2>Ben je op koers?</h2>
             <p className="vc-desc">
               Op basis van {euro(maandinleg)} per maand inleggen
-              {geenPensioen ? '.' : ` en ${euro(maanduitgaven)} per maand opnemen.`} Verwacht scenario (10% rendement).
+              {geenPensioen
+                ? '.'
+                : ` en ${euro(maanduitgaven)} per maand uitgeven${
+                    heeftInkomen ? ', waarvan een deel uit AOW, pensioen of ander inkomen komt' : ''
+                  }, met als doelleeftijd je ${formatLeeftijd(ijkLeeftijd)}e.`}{' '}
+              Alle bedragen staan in prijzen van nu: wat je er straks nog voor kunt kopen.
             </p>
-            <div className="vc-cards2">
-              <div className="vc-card">
-                <div className="vc-card-label">JIJ BOUWT OP</div>
-                <div className="vc-card-num">{euro(nominaalEind)}</div>
-                <div className="vc-card-note">Op {bl}-jarige leeftijd bij 10% rendement</div>
-              </div>
-              {!geenPensioen && (
-                <div className="vc-card">
-                  <div className="vc-card-label">JE HEBT NODIG</div>
-                  <div className="vc-card-num">{euro(benodigdNominaal)}</div>
-                  <div className="vc-card-note">
-                    {onttrekkingsjaren} jaar lang {euro(maanduitgaven)}/maand
-                  </div>
-                </div>
-              )}
-            </div>
-            <div className={'vc-banner ' + (buffer >= 0 ? 'good' : 'bad')}>
-              <div className="vc-banner-label">{buffer >= 0 ? 'JE HEBT EEN BUFFER VAN' : 'JE KOMT TEKORT'}</div>
-              <div className="vc-banner-num">{euro(Math.abs(buffer))}</div>
-              <div className="vc-banner-sub">
-                {geenPensioen
-                  ? 'Dit vermogen bouw je vrij op, zonder vaste opnamebehoefte.'
-                  : buffer >= 0
-                  ? 'Je bouwt meer op dan je nodig hebt. Je zit op koers, met ruimte over.'
-                  : 'Je bouwt minder op dan je nodig hebt. Overweeg je inleg te verhogen.'}
-              </div>
-            </div>
-            {!geenPensioen && (
-              <>
-                <h4 className="vc-h4">BENODIGD VERMOGEN PER SCENARIO</h4>
-                <p className="vc-desc">
-                  Het vermogen blijft belegd tijdens de onttrekkingsperiode. Bij een hoger rendement heb je minder
-                  startkapitaal nodig.
-                </p>
-                <div className="vc-cards3">
-                  {scenarios.map((s) => (
-                    <div key={s.rate} className={'vc-card mini' + (s.rate === RENDEMENT ? ' hl' : '')}>
-                      <div className="vc-card-label">{s.naam.toUpperCase()} SCENARIO</div>
-                      <div className="vc-card-rate" style={{ color: '#3EDCB1' }}>
-                        {s.rate}% per jaar
-                      </div>
-                      <div className="vc-card-num small">{euro(benodigd[s.rate])}</div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-            <div className="vc-table">
-              <Row k="Opbouwperiode" v={`${opbouwjaren} jaar`} />
-              {!geenPensioen && <Row k="Onttrekkingsperiode" v={`${onttrekkingsjaren} jaar (${bl} tot ${tl})`} />}
-              <Row k="Maandelijkse inleg" v={euro(maandinleg)} />
-              {!geenPensioen && <Row k="Gewenste maandelijkse uitgaven" v={euro(maanduitgaven)} />}
-              <Row k="Opgebouwd vermogen (10%)" v={euro(nominaalEind)} />
-              {!geenPensioen && <Row k="Benodigd vermogen (10%)" v={euro(benodigdNominaal)} />}
-              <Row k="Buffer" v={euro(buffer)} green last />
-            </div>
-            <Foot text="Berekening op basis van bruto rendement, zonder box 3 belasting." />
-            <div className="vc-cta">
-              <div>
-                <h3>Wat doet inflatie met jouw plan?</h3>
-                <p>Zie wat inflatie per jaar betekent voor je eindkapitaal en levenskosten, en pas 'm zelf aan.</p>
-              </div>
-              <button className="vc-btn-primary" onClick={() => go(6)}>
-                BEKIJK INFLATIE →
-              </button>
-            </div>
-            <div className="vc-btns">
-              <button className="vc-btn-back" onClick={() => go(4)}>
-                ← AANPASSEN
-              </button>
-            </div>
-          </section>
-        )}
 
-        {step === 6 && results && !loading && (
-          <section>
-            <div className="vc-step">STAP 6 VAN 8 — INFLATIEGECORRIGEERD</div>
-            <h2>Wat doet inflatie met jouw plan?</h2>
-            <p className="vc-desc">
-              Bij {formatProcent(inflatie)} inflatie per jaar kost hetzelfde leven na {opbouwjaren} jaar {euro(uitgavenNaInflatie)} per
-              maand in plaats van {euro(maanduitgaven)}. Dit is wat dat betekent voor jouw plan.
-            </p>
             <label className="vc-label">INFLATIE PER JAAR</label>
             <div className="vc-sliderrow">
               <input
@@ -561,66 +647,213 @@ export default function VermogensopbouwCalculator() {
                 onChange={(e) => {
                   const v = parseFloat(e.target.value);
                   setInflatie(v);
-                  fetchResults({ inflatie: v });
+                  fetchResults({ inflatie: v }, true);
                 }}
               />
               <span className="vc-slidervalue">{formatProcent(inflatie)}</span>
             </div>
-            <p className="vc-hint">Historisch gemiddelde EU-inflatie: ±2–3%. In 2022 liep het op tot 10%+.</p>
-            <h4 className="vc-h4">JOUW EINDKAPITAAL IN HUIDIGE KOOPKRACHT</h4>
-            <p className="vc-desc">
-              Door inflatie is €1 in de toekomst minder waard. Dit is wat jouw opgebouwde vermogen straks écht betekent.
+            <p className="vc-hint">
+              Historisch gemiddelde EU-inflatie: ±2–3%. In 2022 liep het op tot 10%+. Sleep de schuif en zie wat inflatie met
+              je geld doet.
+              {!geenPensioen &&
+                ` Bij ${formatProcent(inflatie)} inflatie kost hetzelfde leven op je ${formatLeeftijd(bl)}e ${euro(
+                  uitgavenNaInflatie,
+                )} per maand in plaats van ${euro(maanduitgaven)}.`}
             </p>
-            <div className="vc-cards2">
-              <div className="vc-card">
-                <div className="vc-card-label">NOMINAAL (ZONDER INFLATIE)</div>
-                <div className="vc-card-num">{euro(nominaalEind)}</div>
-                <div className="vc-card-note">wat je opbouwt op papier</div>
+
+            {!geenPensioen && oordeel && (
+              <div className={'vc-banner ' + (oordeel === 'groen' ? 'good' : oordeel === 'oranje' ? 'warn' : 'bad')}>
+                <div className="vc-banner-label">
+                  {oordeel === 'groen' ? 'JE BENT OP KOERS' : oordeel === 'oranje' ? 'HET IS KRAP' : 'JE KOMT TEKORT'}
+                </div>
+                <div className="vc-banner-num">Tot je {leeftijdTekst(verwacht.met)}</div>
+                <div className="vc-banner-sub">
+                  {oordeel === 'groen' &&
+                    `Je geld gaat mee tot je ${formatLeeftijd(ijkLeeftijd)}e, ook als het rendement tegenvalt (matig scenario: tot je ${leeftijdTekst(
+                      matig.met,
+                    )}).`}
+                  {oordeel === 'oranje' &&
+                    `Bij het verwachte rendement haal je je ${formatLeeftijd(
+                      ijkLeeftijd,
+                    )}e. Valt het rendement tegen (matig scenario), dan is je geld op, op je ${leeftijdTekst(matig.met)}.`}
+                  {oordeel === 'rood' &&
+                    `Zelfs bij het verwachte rendement is je geld op, op je ${leeftijdTekst(verwacht.met)}, terwijl je doelleeftijd ${formatLeeftijd(
+                      ijkLeeftijd,
+                    )} is. Bij tegenvallend rendement is het op, op je ${leeftijdTekst(matig.met)}.`}
+                </div>
               </div>
-              <div className="vc-card hl">
-                <div className="vc-card-label">REËEL (MET {formatProcent(inflatie)} INFLATIE)</div>
-                <div className="vc-card-num fuchsia">{euro(reeelEind)}</div>
-                <div className="vc-card-note">koopkracht in huidige euro's</div>
-              </div>
-            </div>
-            {!geenPensioen && (
-              <>
-                <h4 className="vc-h4">WAT JE NODIG HEBT NA INFLATIE</h4>
-                <p className="vc-desc">
-                  Je levenskosten stijgen mee met inflatie. Over {opbouwjaren} jaar kost hetzelfde leven meer. Dit is
-                  hoeveel vermogen je dan écht nodig hebt.
-                </p>
-                <div className="vc-cards2">
-                  <div className="vc-card">
-                    <div className="vc-card-label">BENODIGD (ZONDER INFLATIE)</div>
-                    <div className="vc-card-num small">{euro(benodigdNominaal)}</div>
-                    <div className="vc-card-note">op basis van huidige kosten</div>
+            )}
+
+            <h4 className="vc-h4">{geenPensioen ? 'JOUW VERMOGEN PER SCENARIO' : 'GELD GAAT MEE TOT, PER SCENARIO'}</h4>
+            <p className="vc-hint" style={{ marginTop: 0, marginBottom: 12 }}>
+              Kies een scenario om de details hieronder te zien.
+            </p>
+            <div className="vc-cards3">
+              {scenarios.map((s) => (
+                <div
+                  key={s.rate}
+                  role="button"
+                  tabIndex={0}
+                  className={'vc-card mini clickable' + (s.rate === gekozenRate ? ' hl' : '')}
+                  onClick={() => setGekozenRate(s.rate)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') setGekozenRate(s.rate);
+                  }}
+                >
+                  <div className="vc-card-label">{s.naam.toUpperCase()} SCENARIO</div>
+                  <div className="vc-card-rate" style={{ color: '#3EDCB1' }}>
+                    {s.rate}% per jaar
                   </div>
-                  <div className="vc-card hl">
-                    <div className="vc-card-label">BENODIGD (MET {formatProcent(inflatie)} INFLATIE)</div>
-                    <div className="vc-card-num small fuchsia">{euro(benodigdNaInflatie)}</div>
-                    <div className="vc-card-note">gecorrigeerde levenskosten</div>
+                  <div className="vc-card-num small">
+                    {geenPensioen ? euro(sc(s.rate).met.vermogen) : `Tot je ${leeftijdTekst(sc(s.rate).met)}`}
+                  </div>
+                  <div className="vc-card-note">
+                    {geenPensioen ? "in prijzen van nu" : `${formatLeeftijd(ijkLeeftijd)}e was je doelleeftijd`}
                   </div>
                 </div>
-              </>
-            )}
-            <div className="vc-table">
-              <Row k="Opbouwperiode" v={`${opbouwjaren} jaar`} />
-              <Row k="Inflatiepercentage" v={`${formatProcent(inflatie)} per jaar`} />
-              {!geenPensioen && <Row k="Maandelijkse uitgaven nu" v={euro(maanduitgaven)} />}
-              {!geenPensioen && <Row k={`Maandelijkse uitgaven na ${opbouwjaren} jaar`} v={euro(uitgavenNaInflatie)} last />}
-              {geenPensioen && <Row k="Reëel eindkapitaal (huidige koopkracht)" v={euro(reeelEind)} last />}
+              ))}
             </div>
-            <Foot
-              text={`Berekening op basis van bruto rendement, zonder box 3 belasting. Inflatie: ${formatProcent(inflatie)} per jaar.`}
-            />
+
+            <h4 className="vc-h4">
+              {gekozenNaam.toUpperCase()} SCENARIO ({gekozenRate}%): ZONDER EN MET INFLATIE
+            </h4>
+            <div className="vc-duo">
+              <div className="vc-duo-head">
+                <span />
+                <span>ALS PRIJZEN NIET STIJGEN</span>
+                <span className="met">MET {formatProcent(inflatie)} INFLATIE</span>
+              </div>
+              <DuoRow k={`Jouw vermogen op je ${formatLeeftijd(bl)}e`} a={euro(gek.zonder.vermogen)} b={euro(gek.met.vermogen)} last={geenPensioen} />
+              {!geenPensioen && (
+                <>
+                  <DuoRow k={`Nodig tot je ${formatLeeftijd(ijkLeeftijd)}e`} a={euro(gek.zonder.nodig)} b={euro(gek.met.nodig)} />
+                  <DuoRow
+                    k="Buffer of tekort"
+                    a={bufferTekst(gek.zonder.buffer)}
+                    b={bufferTekst(gek.met.buffer)}
+                    tone={gek.met.buffer >= 0 ? 'good' : 'bad'}
+                  />
+                  <DuoRow
+                    k="Geld gaat mee tot"
+                    a={`je ${leeftijdTekst(gek.zonder)}`}
+                    b={`je ${leeftijdTekst(gek.met)}`}
+                    last
+                  />
+                </>
+              )}
+            </div>
+            {inflatieImpact > 0.5 && !geenPensioen && (
+              <p className="vc-impact">
+                Door {formatProcent(inflatie)} inflatie heb je <strong>{euro(inflatieImpact)}</strong> minder ruimte.
+              </p>
+            )}
+            {inflatieImpact > 0.5 && geenPensioen && (
+              <p className="vc-impact">
+                Door {formatProcent(inflatie)} inflatie is je vermogen <strong>{euro(gek.zonder.vermogen - gek.met.vermogen)}</strong>{' '}
+                minder waard.
+              </p>
+            )}
+
+            {!geenPensioen && (
+              <div className="vc-wel">
+                <div className="vc-wel-titel">DIT KUN JE WÉL</div>
+                <p>
+                  Met dit vermogen kun je tot je {formatLeeftijd(ijkLeeftijd)}e ongeveer <strong>{euro(verwacht.met.kanUitgeven)}</strong> per
+                  maand uitgeven in het verwachte scenario, en <strong>{euro(matig.met.kanUitgeven)}</strong> als het rendement tegenvalt
+                  {heeftInkomen ? ' (inclusief je AOW, pensioen en ander inkomen)' : ''}.
+                </p>
+                <p>
+                  {verwacht.met.inlegNodig <= maandinleg + 0.005
+                    ? `Voor ${euro(maanduitgaven)} per maand haal je je doelleeftijd in het verwachte scenario al met je huidige inleg.`
+                    : `Voor ${euro(maanduitgaven)} per maand heb je in het verwachte scenario ${euro(
+                        verwacht.met.inlegNodig,
+                      )} per maand inleg nodig. Nu leg je ${euro(maandinleg)} in. Zie stap 7.`}
+                </p>
+              </div>
+            )}
+
+            <details className="vc-details">
+              <summary>Bekijk de berekening</summary>
+              <p className="vc-hint" style={{ marginTop: 0, marginBottom: 12 }}>
+                We rekenen in <strong>prijzen van nu</strong>: wat je nu voor een bedrag kunt kopen, kun je dat later ook nog. De
+                hogere prijzen door inflatie zie je terug bij <strong>prijzen van dan</strong>.
+              </p>
+              <div className="vc-table">
+                <Row k="Opbouwperiode" v={`${formatLeeftijd(opbouwjaren)} jaar`} />
+                {!geenPensioen && (
+                  <Row k="Onttrekkingsperiode tot je doelleeftijd" v={`${formatLeeftijd(onttrekkingsjaren)} jaar (${formatLeeftijd(bl)} tot ${formatLeeftijd(ijkLeeftijd)})`} />
+                )}
+                <Row k="Opgebouwd (zonder inflatie)" v={euro(gek.zonder.vermogenNominaal)} />
+                <Row k="Inflatie" v={`${formatProcent(inflatie)} per jaar`} />
+                <Row k="Opgebouwd, in prijzen van nu" v={euro(gek.met.vermogen)} last={geenPensioen} />
+                {!geenPensioen && <Row k="Gewenste uitgaven (prijzen van nu)" v={`${euro(maanduitgaven)} per maand`} />}
+                {!geenPensioen && <Row k={`Hetzelfde leven kost op je ${formatLeeftijd(bl)}e (prijzen van dan, inflatie)`} v={`${euro(uitgavenNaInflatie)} per maand`} last={!heeftInkomen} />}
+                {!geenPensioen &&
+                  heeftInkomen &&
+                  fases.map((f, i) => (
+                    <Row
+                      key={i}
+                      k={`Uit vermogen, ${formatLeeftijd(f.vanLeeftijd)} tot ${formatLeeftijd(f.totLeeftijd)} jaar (prijzen van nu)`}
+                      v={`${euro(f.gat)} per maand`}
+                      last={i === fases.length - 1}
+                    />
+                  ))}
+              </div>
+            </details>
+
+            <Foot text={`Berekening op basis van bruto rendement, zonder kosten en box 3 belasting. Uitgaven, AOW en pensioen zijn vaste bedragen in prijzen van nu. Inflatie: ${formatProcent(inflatie)} per jaar. Dit is geen beleggingsadvies.`} />
             <div className="vc-cta">
               <div>
                 <h3>Wat kun je hier straks mee opnemen?</h3>
                 <p>Bereken hoeveel je maandelijks van dit vermogen kunt opnemen, zonder dat het opraakt.</p>
               </div>
-              <button className="vc-btn-primary" onClick={() => go(7)}>
+              <button className="vc-btn-primary" onClick={() => go(6)}>
                 BEKIJK JE OPNAME →
+              </button>
+            </div>
+            <div className="vc-btns">
+              <button className="vc-btn-back" onClick={() => go(4)}>
+                ← AANPASSEN
+              </button>
+            </div>
+          </section>
+        )}
+
+        {step === 6 && results && !loading && (
+          <section>
+            <div className="vc-step">STAP 6 VAN 7 — WAT KUN JE OPNEMEN</div>
+            <h2>Hoeveel zou je per maand kunnen opnemen?</h2>
+            <p className="vc-desc">
+              Beleggers gebruiken al jaren de <strong>4%-regel</strong>: een vuistregel die zegt{' '}
+              <strong style={{ color: '#E21B70' }}>
+                hoeveel je jaarlijks van je opgebouwde vermogen kunt opnemen zonder dat het ooit opraakt
+              </strong>
+              . Dit is wat dat betekent voor jouw
+              vermogen, op je {formatLeeftijd(bl)}e. Alle bedragen in prijzen van nu.
+            </p>
+            <ScenarioChips />
+            <div className="vc-duo">
+              <div className="vc-duo-head">
+                <span />
+                <span>ALS PRIJZEN NIET STIJGEN</span>
+                <span className="met">MET {formatProcent(inflatie)} INFLATIE</span>
+              </div>
+              <DuoRow k={`Opgebouwd vermogen op je ${formatLeeftijd(bl)}e`} a={euro(gek.zonder.vermogen)} b={euro(gek.met.vermogen)} />
+              <DuoRow
+                k="Levenslange opname per maand"
+                a={euro(gek.zonder.vierProcentPerMaand)}
+                b={euro(gek.met.vierProcentPerMaand)}
+                last
+              />
+            </div>
+            <Foot text="De 4%-regel is een vuistregel, geen garantie. De werkelijke uitkomst hangt af van rendement, inflatie en hoe lang het kapitaal moet meegaan. Dit is geen beleggingsadvies." />
+            <div className="vc-cta">
+              <div>
+                <h3>Wat moet jij extra inleggen?</h3>
+                <p>Bereken welke maandelijkse inleg je nodig hebt om je doelen te halen.</p>
+              </div>
+              <button className="vc-btn-primary" onClick={() => go(7)}>
+                BEREKEN INLEG →
               </button>
             </div>
             <div className="vc-btns">
@@ -633,134 +866,75 @@ export default function VermogensopbouwCalculator() {
 
         {step === 7 && results && !loading && (
           <section>
-            <div className="vc-step">STAP 7 VAN 8 — WAT KUN JE OPNEMEN</div>
-            <h2>Hoeveel zou je per maand kunnen opnemen?</h2>
-            <p className="vc-desc">
-              Beleggers gebruiken al jaren de <strong>4%-regel</strong>: een vuistregel die zegt hoeveel je jaarlijks van
-              je opgebouwde vermogen kunt opnemen <strong>zonder dat het ooit opraakt</strong>. Dit is wat dat betekent
-              voor jouw vermogen, op je {bl}e.
-            </p>
-            <div className="vc-cards2">
-              <div className="vc-card">
-                <div className="vc-card-label">NOMINAAL VERMOGEN</div>
-                <div className="vc-card-num">{euro((nominaalEind * 0.04) / 12)}</div>
-                <div className="vc-card-note">per maand, bij 4% opname per jaar</div>
-              </div>
-              <div className="vc-card hl">
-                <div className="vc-card-label">IN HUIDIGE KOOPKRACHT</div>
-                <div className="vc-card-num fuchsia">{euro((reeelEind * 0.04) / 12)}</div>
-                <div className="vc-card-note">per maand, gecorrigeerd voor inflatie</div>
-              </div>
-            </div>
-            <div className="vc-table">
-              <Row k={`Opgebouwd vermogen op je ${bl}e (nominaal)`} v={euro(nominaalEind)} />
-              <Row k="Opgebouwd vermogen in huidige koopkracht" v={euro(reeelEind)} />
-              <Row k="Maandelijkse opname (zonder inflatie)" v={euro((nominaalEind * 0.04) / 12)} />
-              <Row k="Maandelijkse opname, na inflatie" v={euro((reeelEind * 0.04) / 12)} last />
-            </div>
-            <Foot text="De 4%-regel is een vuistregel, geen garantie. De werkelijke uitkomst hangt af van rendement, inflatie en hoe lang het kapitaal moet meegaan. Dit is geen beleggingsadvies." />
-            <div className="vc-cta">
-              <div>
-                <h3>Wat moet jij extra inleggen?</h3>
-                <p>Bereken welke maandelijkse inleg je nodig hebt om je doelen te halen.</p>
-              </div>
-              <button className="vc-btn-primary" onClick={() => go(8)}>
-                BEREKEN INLEG →
-              </button>
-            </div>
-            <div className="vc-btns">
-              <button className="vc-btn-back" onClick={() => go(6)}>
-                ← TERUG
-              </button>
-            </div>
-          </section>
-        )}
-
-        {step === 8 && results && !loading && (
-          <section>
-            <div className="vc-step">STAP 8 VAN 8 — BENODIGDE INLEG</div>
+            <div className="vc-step">STAP 7 VAN 7 — BENODIGDE INLEG</div>
             <h2>Wat moet je inleggen?</h2>
-            <p className="vc-desc">
-              Dit is wat je per maand zou moeten inleggen om elk doel te halen. We zetten het naast wat je nu inlegt, zodat
-              je het verschil meteen ziet.
-            </p>
+            {geenPensioen ? (
+              <div className="vc-goal">
+                <div className="vc-goal-titel">Eerst je gewenste uitgaven invullen</div>
+                <div className="vc-goal-uitleg">
+                  Je hebt stap 4 overgeslagen, dus we weten niet wat je later nodig hebt. Vul je gewenste maandbedrag in, dan
+                  rekenen we uit wat je daarvoor moet inleggen.
+                </div>
+                <button className="vc-btn-primary" onClick={() => go(4)}>
+                  NAAR STAP 4 →
+                </button>
+              </div>
+            ) : (
+              <>
+                <p className="vc-desc">
+                  Dit is wat je per maand zou moeten inleggen om je geld te laten meegaan tot je {formatLeeftijd(ijkLeeftijd)}e, bij{' '}
+                  {euro(maanduitgaven)} per maand aan uitgaven. We zetten het naast wat je nu inlegt, zodat je het verschil meteen
+                  ziet.
+                </p>
 
-            <div className="vc-nowbar">
-              <span>JE LEGT NU IN</span>
-              <strong>
-                {euro(maandinleg)}
-                <small> per maand</small>
-              </strong>
-            </div>
+                <div className="vc-nowbar">
+                  <span>JE LEGT NU IN</span>
+                  <strong>
+                    {euro(maandinleg)}
+                    <small> per maand</small>
+                  </strong>
+                </div>
 
-            {(
-              [
-                {
-                  titel: 'Je vermogen beschermen tegen inflatie',
-                  uitleg:
-                    'Je bouwt nu een bedrag op, maar door inflatie is dat straks minder waard. Dit is de inleg om je koopkracht van vandaag te behouden.',
-                  opbouw: nominaalEind,
-                  midLabel: 'WAARD NA INFLATIE',
-                  midValue: reeelEind,
-                  inleg: inlegInStandHouden,
-                  toon: true,
-                },
-                {
-                  titel: 'Je levenskosten kunnen betalen (zonder inflatie)',
-                  uitleg: 'Genoeg vermogen om van te leven, op basis van wat het leven nu kost.',
-                  opbouw: null,
-                  midLabel: 'HIERVOOR HEB JE NODIG',
-                  midValue: benodigdNominaal,
-                  inleg: inlegLevenskosten,
-                  toon: !geenPensioen,
-                },
-                {
-                  titel: 'Je levenskosten betalen ná inflatie',
-                  uitleg: 'Genoeg vermogen om van te leven als alles straks duurder is.',
-                  opbouw: nominaalEind,
-                  midLabel: 'HIERVOOR HEB JE NODIG',
-                  midValue: benodigdNaInflatie,
-                  inleg: inlegLevenskostenInflatie,
-                  toon: !geenPensioen,
-                },
-              ] as Goal[]
-            )
-              .filter((g) => g.toon)
-              .map((g, i) => {
-                const verschil = maandinleg - g.inleg;
-                const haalbaar = verschil >= 0;
-                return (
-                  <div key={i} className={'vc-goal ' + (haalbaar ? 'ok' : 'tekort')}>
-                    <div className="vc-goal-titel">{g.titel}</div>
-                    <div className="vc-goal-uitleg">{g.uitleg}</div>
-                    <div className="vc-goal-grid">
-                      {g.opbouw != null && (
-                        <div className="vc-goal-cell">
-                          <span>JE BOUWT NU OP</span>
-                          <strong className="navy">{euro(g.opbouw)}</strong>
+                {[
+                  {
+                    titel: `Je geld gaat mee tot je ${formatLeeftijd(ijkLeeftijd)}e`,
+                    uitleg: 'Bij het verwachte rendement (10% per jaar).',
+                    s: verwacht,
+                  },
+                  {
+                    titel: 'Ook als het rendement tegenvalt',
+                    uitleg: 'Bij het matige rendement (7% per jaar). Dit is de veilige variant.',
+                    s: matig,
+                  },
+                ].map((g, i) => {
+                  const verschil = maandinleg - g.s.met.inlegNodig;
+                  const haalbaar = verschil >= -0.005;
+                  return (
+                    <div key={i} className={'vc-goal ' + (haalbaar ? 'ok' : 'tekort')}>
+                      <div className="vc-goal-titel">{g.titel}</div>
+                      <div className="vc-goal-uitleg">{g.uitleg}</div>
+                      <div className="vc-duo flat">
+                        <div className="vc-duo-head">
+                          <span />
+                          <span>ALS PRIJZEN NIET STIJGEN</span>
+                          <span className="met">MET {formatProcent(inflatie)} INFLATIE</span>
                         </div>
-                      )}
-                      <div className="vc-goal-cell">
-                        <span>{g.midLabel}</span>
-                        <strong>{euro(g.midValue)}</strong>
+                        <DuoRow k="Hiervoor heb je nodig" a={euro(g.s.zonder.nodig)} b={euro(g.s.met.nodig)} />
+                        <DuoRow k="Inleg per maand" a={euro(g.s.zonder.inlegNodig)} b={euro(g.s.met.inlegNodig)} last />
                       </div>
-                      <div className="vc-goal-arrow">→</div>
-                      <div className="vc-goal-cell">
-                        <span>INLEG PER MAAND</span>
-                        <strong className="fuchsia">{euro(g.inleg)}</strong>
+                      <div className={'vc-goal-verdict ' + (haalbaar ? 'ok' : 'tekort')}>
+                        {haalbaar
+                          ? `Dit haal je al met je huidige inleg. Je houdt ${euro(Math.max(0, verschil))} per maand over.`
+                          : `Hiervoor heb je ${euro(-verschil)} per maand extra nodig dan je nu inlegt.`}
                       </div>
                     </div>
-                    <div className={'vc-goal-verdict ' + (haalbaar ? 'ok' : 'tekort')}>
-                      {haalbaar
-                        ? `Dit haal je al met je huidige inleg. Je houdt ${euro(verschil)} per maand over.`
-                        : `Hiervoor heb je ${euro(-verschil)} per maand extra nodig dan je nu inlegt.`}
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </>
+            )}
 
             <Foot
-              text={`Berekening op basis van ${RENDEMENT}% bruto rendement, zonder box 3 belasting. Inflatie: ${formatProcent(inflatie)} per jaar.`}
+              text={`Berekening op basis van bruto rendement, zonder kosten en box 3 belasting. Inflatie: ${formatProcent(inflatie)} per jaar. De inleg is een vast bedrag per maand. Dit is geen beleggingsadvies.`}
             />
 
             <div className="vc-pdfwrap">
@@ -782,11 +956,14 @@ export default function VermogensopbouwCalculator() {
                 <button className="vc-btn-quick" onClick={() => go(4)}>
                   ✏️ Uitgaven &amp; looptijd
                 </button>
+                <button className="vc-btn-quick" onClick={() => go(5)}>
+                  ✏️ Inflatie
+                </button>
               </div>
             </div>
 
             <div className="vc-btns">
-              <button className="vc-btn-back" onClick={() => go(7)}>
+              <button className="vc-btn-back" onClick={() => go(6)}>
                 ← TERUG
               </button>
             </div>
@@ -820,13 +997,25 @@ export default function VermogensopbouwCalculator() {
           <div className="vc-report-boxtitle">JOUW GEGEVENS</div>
           <Row k="Huidige leeftijd" v={`${hl} jaar`} />
           <Row k="Gewenste pensioenleeftijd" v={`${bl} jaar`} />
-          <Row k="Opbouwtijd" v={`${opbouwjaren} jaar`} />
-          <Row k="Maandelijkse inleg" v={`${euro(maandinleg)} per maand`} />
-          {!geenPensioen && <Row k="Gewenste maandelijkse uitgaven" v={`${euro(maanduitgaven)} per maand`} last />}
+          <Row k="Opbouwtijd" v={`${formatLeeftijd(opbouwjaren)} jaar`} />
+          <Row k="Maandelijkse inleg" v={`${euro(maandinleg)} per maand`} last={geenPensioen} />
+          {!geenPensioen && <Row k="Gewenste maandelijkse uitgaven" v={`${euro(maanduitgaven)} per maand`} />}
+          {!geenPensioen && (
+            <Row k="Doelleeftijd: geld moet minimaal meegaan tot" v={`${formatLeeftijd(ijkLeeftijd)} jaar`} last={!heeftInkomen} />
+          )}
+          {!geenPensioen &&
+            inkomenBronnen.map((b, i) => (
+              <Row
+                key={b.naam}
+                k={`${b.naam} (netto, vanaf ${formatLeeftijd(b.vanafLeeftijd)} jaar)`}
+                v={`${euro(b.bedrag)} per maand`}
+                last={i === inkomenBronnen.length - 1}
+              />
+            ))}
         </div>
 
         <div className="vc-report-box">
-          <div className="vc-report-boxtitle">OPBOUW PER SCENARIO</div>
+          <div className="vc-report-boxtitle">OPBOUW PER SCENARIO (OP PAPIER)</div>
           <div className="vc-cards3 report">
             {scenarios.map((s) => (
               <div key={s.rate} className="vc-rcard">
@@ -839,25 +1028,77 @@ export default function VermogensopbouwCalculator() {
         </div>
 
         <div className="vc-report-box">
-          <div className="vc-report-boxtitle">INFLATIEGECORRIGEERD</div>
-          <Row k="Inflatiepercentage" v={`${formatProcent(inflatie)} per jaar`} />
-          <Row k="Reëel eindkapitaal (huidige koopkracht)" v={euro(reeelEind)} last={geenPensioen} />
-          {!geenPensioen && <Row k="Benodigd na inflatie" v={euro(benodigdNaInflatie)} last />}
+          <div className="vc-report-boxtitle">
+            INFLATIE: {formatProcent(inflatie)} PER JAAR (BEDRAGEN IN PRIJZEN VAN NU)
+          </div>
+          <Row k={`Jouw vermogen op je ${formatLeeftijd(bl)}e, verwacht scenario (op papier)`} v={euro(verwacht.zonder.vermogenNominaal)} />
+          <Row k="Hetzelfde vermogen in prijzen van nu" v={euro(verwacht.met.vermogen)} last={geenPensioen} />
+          {!geenPensioen && <Row k={`Hetzelfde leven kost op je ${formatLeeftijd(bl)}e per maand (prijzen van dan, inflatie)`} v={euro(uitgavenNaInflatie)} last />}
         </div>
 
-        <div className="vc-report-box">
-          <div className="vc-report-boxtitle">WAT KUN JE PER MAAND OPNEMEN (4%-REGEL)</div>
-          <Row k="Maandelijkse opname (zonder inflatie)" v={euro((nominaalEind * 0.04) / 12)} />
-          <Row k="Maandelijkse opname, na inflatie" v={euro((reeelEind * 0.04) / 12)} last />
-        </div>
+        {!geenPensioen && oordeel && (
+          <div className="vc-report-box">
+            <div className="vc-report-boxtitle">JE GELD GAAT MEE TOT (MET {formatProcent(inflatie)} INFLATIE)</div>
+            <Row
+              k="Oordeel"
+              v={oordeel === 'groen' ? 'Op koers' : oordeel === 'oranje' ? 'Krap' : 'Tekort'}
+              green={oordeel === 'groen'}
+              red={oordeel === 'rood'}
+            />
+            {scenarios.map((s, i) => (
+              <Row
+                key={s.rate}
+                k={`${s.naam} scenario (${s.rate}%)`}
+                v={`je ${leeftijdTekst(sc(s.rate).met)}`}
+                last={i === scenarios.length - 1}
+              />
+            ))}
+          </div>
+        )}
+
+        {!geenPensioen && (
+          <div className="vc-report-box">
+            <div className="vc-report-boxtitle">VERWACHT SCENARIO: ZONDER EN MET INFLATIE</div>
+            <div className="vc-duo flat">
+              <div className="vc-duo-head">
+                <span />
+                <span>ZONDER INFLATIE</span>
+                <span className="met">MET {formatProcent(inflatie)}</span>
+              </div>
+              <DuoRow k="Vermogen" a={euro(verwacht.zonder.vermogen)} b={euro(verwacht.met.vermogen)} />
+              <DuoRow k={`Nodig tot je ${formatLeeftijd(ijkLeeftijd)}e`} a={euro(verwacht.zonder.nodig)} b={euro(verwacht.met.nodig)} />
+              <DuoRow k="Buffer of tekort" a={bufferTekst(verwacht.zonder.buffer)} b={bufferTekst(verwacht.met.buffer)} />
+              <DuoRow k="Geld gaat mee tot" a={`je ${leeftijdTekst(verwacht.zonder)}`} b={`je ${leeftijdTekst(verwacht.met)}`} last />
+            </div>
+          </div>
+        )}
 
         <div className="vc-report-box">
-          <div className="vc-report-boxtitle">JOUW DOELEN EN BENODIGDE INLEG</div>
-          <Row k="Je legt nu in" v={`${euro(maandinleg)} /mnd`} />
-          <Row k="Vermogen beschermen tegen inflatie" v={`${euro(inlegInStandHouden)} /mnd`} last={geenPensioen} />
-          {!geenPensioen && <Row k="Levenskosten kunnen betalen" v={`${euro(inlegLevenskosten)} /mnd`} />}
-          {!geenPensioen && <Row k="Levenskosten betalen na inflatie" v={`${euro(inlegLevenskostenInflatie)} /mnd`} last />}
+          <div className="vc-report-boxtitle">WAT KUN JE PER MAAND OPNEMEN (4%-REGEL, VERWACHT SCENARIO)</div>
+          <div className="vc-duo flat">
+            <div className="vc-duo-head">
+              <span />
+              <span>ZONDER INFLATIE</span>
+              <span className="met">MET {formatProcent(inflatie)}</span>
+            </div>
+            <DuoRow
+              k="Levenslange opname per maand"
+              a={euro(verwacht.zonder.vierProcentPerMaand)}
+              b={euro(verwacht.met.vierProcentPerMaand)}
+              last
+            />
+          </div>
         </div>
+
+        {!geenPensioen && (
+          <div className="vc-report-box">
+            <div className="vc-report-boxtitle">BENODIGDE INLEG PER MAAND</div>
+            <Row k="Je legt nu in" v={`${euro(maandinleg)} /mnd`} />
+            <Row k="Nodig, verwacht scenario, zonder inflatie" v={`${euro(verwacht.zonder.inlegNodig)} /mnd`} />
+            <Row k={`Nodig, verwacht scenario, met ${formatProcent(inflatie)} inflatie`} v={`${euro(verwacht.met.inlegNodig)} /mnd`} />
+            <Row k={`Nodig, matig scenario, met ${formatProcent(inflatie)} inflatie`} v={`${euro(matig.met.inlegNodig)} /mnd`} last />
+          </div>
+        )}
 
         <p className="vc-report-disclaimer">
           © {new Date().getFullYear()} Claudia Voogt. Alle rechten voorbehouden. Deze tool mag niet worden gedeeld, gekopieerd, nagebouwd of hergebruikt zonder schriftelijke toestemming. Deze tool is een hulpmiddel, geen beleggingsadvies. De informatie is met zorg samengesteld, maar er kunnen geen rechten aan worden ontleend. Juistheid en volledigheid worden niet gegarandeerd.
@@ -920,9 +1161,33 @@ html, body { margin:0 !important; padding:0 !important; background:#F5F5F5 !impo
 .vc-row { display:flex; justify-content:space-between; padding:14px 0; border-bottom:1px solid #f0edf3; font-size:15px; }
 .vc-row.last { border-bottom:none; }
 .vc-row strong { font-family:'Montserrat',sans-serif; font-weight:700; }
-.vc-banner { border-radius:16px; padding:26px; text-align:center; color:#fff; margin-bottom:22px; flex:1; }
+.vc-banner { border-radius:16px; padding:26px; text-align:center; color:#fff; margin:18px 0 22px; flex:1; }
 .vc-banner.good { background:linear-gradient(135deg,#1f9e6e,#157a52); }
 .vc-banner.bad { background:linear-gradient(135deg,#e8472e,#d63a1f); }
+.vc-banner.warn { background:linear-gradient(135deg,#f0a020,#d9820f); }
+.vc-card.clickable { cursor:pointer; }
+.vc-card.clickable:focus-visible { outline:2px solid #6B2D84; }
+.vc-duo { background:#fff; border:1px solid #ebe7ef; border-radius:16px; padding:6px 20px; margin-bottom:14px; }
+.vc-duo.flat { border:none; padding:0; margin-bottom:0; background:transparent; }
+.vc-duo-head, .vc-duo-row { display:grid; grid-template-columns:1.3fr 1fr 1fr; gap:10px; align-items:baseline; }
+.vc-duo-head { padding:14px 0 8px; font-family:'Montserrat',sans-serif; font-weight:700; font-size:10px; letter-spacing:.6px; color:#9a9aa2; border-bottom:1px solid #f0edf3; }
+.vc-duo-head span { text-align:right; }
+.vc-duo-head span.met { color:#6B2D84; }
+.vc-duo-row { padding:13px 0; border-bottom:1px solid #f0edf3; font-size:14px; }
+.vc-duo-row.last { border-bottom:none; }
+.vc-duo-row .a { text-align:right; color:#8a8d99; font-family:'Montserrat',sans-serif; font-weight:600; }
+.vc-duo-row .b { text-align:right; font-family:'Montserrat',sans-serif; font-weight:800; color:#1A1F36; }
+.vc-duo-row .b.good { color:#1a7a52; }
+.vc-duo-row .b.bad { color:#d63a1f; }
+.vc-impact { background:#f6effa; border-radius:12px; padding:12px 16px; font-size:14px; color:#4a2168; margin:0 0 18px; }
+.vc-chips { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+.vc-chip { font-family:'Montserrat',sans-serif; font-weight:700; font-size:12px; padding:9px 14px; border-radius:999px; border:1.5px solid #d9cfe2; background:#fff; color:#6B2D84; cursor:pointer; }
+.vc-chip.on { background:#6B2D84; color:#fff; border-color:#6B2D84; }
+.vc-wel { background:#eefaf5; border:1px solid #bfeadb; border-radius:16px; padding:18px 20px; margin:22px 0 14px; }
+.vc-wel-titel { font-family:'Montserrat',sans-serif; font-weight:700; letter-spacing:1px; font-size:12px; color:#157a52; margin-bottom:8px; }
+.vc-wel p { margin:0 0 8px; font-size:15px; line-height:1.55; }
+.vc-details { margin:6px 0 18px; }
+.vc-details summary { cursor:pointer; font-family:'Montserrat',sans-serif; font-weight:700; font-size:13px; color:#6B2D84; margin-bottom:10px; }
 .vc-banner-label { font-family:'Montserrat',sans-serif; font-weight:700; letter-spacing:1.5px; font-size:12px; opacity:.9; }
 .vc-banner-num { font-family:'Montserrat',sans-serif; font-weight:800; font-size:40px; margin:6px 0; }
 .vc-banner-sub { font-style:italic; font-size:14px; opacity:.95; line-height:1.5; }
@@ -934,7 +1199,16 @@ html, body { margin:0 !important; padding:0 !important; background:#F5F5F5 !impo
 .vc-cta h3 { font-family:'Montserrat',sans-serif; font-weight:700; margin:0 0 6px; font-size:18px; }
 .vc-cta p { margin:0; font-style:italic; font-size:14px; opacity:.9; }
 .vc-disclaimer { background:#f4f1f7; border-radius:12px; padding:18px 20px; color:#6b6b73; font-size:13px; line-height:1.6; margin:24px 0; }
-.vc-skipnote { background:#fdf3f8; border:1px solid #f3c9dd; border-left:5px solid #E21B70; border-radius:12px; padding:16px 18px; margin-top:24px; color:#1A1F36; font-size:15px; line-height:1.55; }
+.vc-inkomen { background:#fff; border:1px solid #ebe7ef; border-radius:16px; padding:20px 20px 8px; margin-top:26px; }
+.vc-inkomen-titel { font-family:'Montserrat',sans-serif; font-weight:700; letter-spacing:1px; font-size:12px; color:#6B2D84; margin-bottom:8px; }
+.vc-inkomen-uitleg { color:#6b6b73; font-size:14px; line-height:1.55; margin:0 0 16px; }
+.vc-inkrow { margin-bottom:18px; }
+.vc-inkname { font-family:'Montserrat',sans-serif; font-weight:800; font-size:13px; color:#1A1F36; margin-bottom:6px; }
+.vc-inkfields { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.vc-inkmini { display:block; font-family:'Montserrat',sans-serif; font-weight:600; letter-spacing:.5px; font-size:10px; color:#9a9aa2; margin-bottom:5px; }
+.vc-inkhint { color:#9a9aa2; font-size:12.5px; font-style:italic; line-height:1.5; margin:6px 0 10px; }
+.vc-inkhint a { color:#6B2D84; }
+.vc-skipnote {background:#fdf3f8; border:1px solid #f3c9dd; border-left:5px solid #E21B70; border-radius:12px; padding:16px 18px; margin-top:24px; color:#1A1F36; font-size:15px; line-height:1.55; }
 .vc-skipnote strong { font-family:'Montserrat',sans-serif; font-weight:700; }
 .vc-nowbar { display:flex; justify-content:space-between; align-items:center; background:linear-gradient(110deg,#211A3A,#5a2576 70%,#7A2D8F); color:#fff; border-radius:14px; padding:16px 22px; margin-bottom:22px; }
 .vc-nowbar span { font-family:'Montserrat',sans-serif; font-weight:700; letter-spacing:1px; font-size:12px; opacity:.85; }
@@ -985,10 +1259,18 @@ html, body { margin:0 !important; padding:0 !important; background:#F5F5F5 !impo
 .vc-quickedit-btns { display:flex; flex-wrap:wrap; gap:10px; }
 .vc-btn-quick { background:#fff; color:#1A1F36; border:1.5px solid #cdbcd9; padding:10px 18px; border-radius:10px; font-family:'Montserrat',sans-serif; font-weight:700; letter-spacing:.5px; font-size:12px; cursor:pointer; transition:border-color .15s, background .15s; }
 .vc-btn-quick:hover { border-color:#6B2D84; background:#f9f5fc; }
-@media (max-width:560px) { .vc-btn-quick { flex:1; min-width:calc(50% - 5px); text-align:center; } }
-  .vc-card { min-width:calc(50% - 14px); }
+@media (max-width:560px) {
+  .vc-btn-quick { flex:1; min-width:calc(50% - 5px); text-align:center; }
+  .vc-cards3, .vc-cards2 { gap:8px; }
+  .vc-card { min-width:0; padding:12px; }
+  .vc-card-num { font-size:20px; }
+  .vc-card-num.small { font-size:17px; }
+  .vc-card-label { font-size:9px; }
   .vc-header h1 { font-size:26px; }
   .vc-cta { flex-direction:column; align-items:flex-start; }
+  .vc-duo { padding:4px 14px; }
+  .vc-duo-head, .vc-duo-row { grid-template-columns:1.1fr 1fr 1fr; gap:6px; }
+  .vc-duo-row { font-size:13px; }
   .vc-goal-arrow { display:none; }
   .vc-goal-grid { gap:18px; }
   .vc-goal-cell { min-width:calc(50% - 9px); }
