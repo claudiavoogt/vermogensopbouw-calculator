@@ -1207,7 +1207,9 @@ html, body { margin:0 !important; padding:0 !important; background:#F5F5F5 !impo
 .vc-inkfields { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
 .vc-inkmini { display:block; font-family:'Montserrat',sans-serif; font-weight:600; letter-spacing:.5px; font-size:10px; color:#9a9aa2; margin-bottom:5px; }
 .vc-inkhint { color:#9a9aa2; font-size:12.5px; font-style:italic; line-height:1.5; margin:6px 0 10px; }
-.vc-inkhint a { color:#6B2D84; }
+.vc-inkhint a { color:#E21B70; font-style:normal; font-weight:700; font-size:13.5px; text-decoration:underline; text-decoration-thickness:2px; text-underline-offset:3px; white-space:nowrap; }
+.vc-inkhint a::after { content:" \\2197"; }
+.vc-inkhint a:hover { color:#6B2D84; }
 .vc-skipnote {background:#fdf3f8; border:1px solid #f3c9dd; border-left:5px solid #E21B70; border-radius:12px; padding:16px 18px; margin-top:24px; color:#1A1F36; font-size:15px; line-height:1.55; }
 .vc-skipnote strong { font-family:'Montserrat',sans-serif; font-weight:700; }
 .vc-nowbar { display:flex; justify-content:space-between; align-items:center; background:linear-gradient(110deg,#211A3A,#5a2576 70%,#7A2D8F); color:#fff; border-radius:14px; padding:16px 22px; margin-bottom:22px; }
